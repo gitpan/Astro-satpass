@@ -1,0 +1,29 @@
+Astro-Coord-ECI
+
+This package implements the NORAD orbital propagation models described
+in their "SPACETRACK REPORT NO. 3, Models for Propagation of NORAD
+Element Sets," plus various support classes.  In other words, it turns
+the two- or three-line element sets available from such places as
+http://www.space-track.org/ or http://celestrak.com/ into predictions
+of where the relevant orbiting bodies will be.
+
+The package also includes a script, "satpass", which uses the classes
+to implement a satellite visibility prediction system.
+
+This package is installable by the usual incantation:
+
+    gunzip Astro-Coord-ECI-9.999.tar.gz
+    tar -xf Astro-Coord-ECI-9.999.tar
+    perl Makefile.PL
+    make
+    make test
+    make install
+
+You should substitute the appropriate program name for 'make', eg nmake
+(typically) under MSWin32, or mms or mmk under VMS.
+
+Of course, since it's pure Perl, you can just expand the kit and drop
+the .pm files into the Astro/Coord/ECI directory (creating it if
+necessary) in the appropriate place in your @INC directories.
+
+Tom Wyant

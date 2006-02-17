@@ -1,0 +1,15 @@
+# http://module-build.sourceforge.net/META-spec.html
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         Astro-satpass
+version:      0.001
+version_from: ECI.pm
+installdirs:  site
+requires:
+    Astro::SpaceTrack:             0.011
+    Clipboard:                     0
+    Date::Manip:                   0
+    Soap::Lite:                    0
+    XML::Parser:                   0
+
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version 6.30
