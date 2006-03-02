@@ -1,14 +1,14 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Astro-satpass
-version:      0.001
+version:      0.002
 version_from: ECI.pm
 installdirs:  site
 requires:
-    Astro::SpaceTrack:             0.011
-    Clipboard:                     0
-    Date::Manip:                   0
-    Soap::Lite:                    0
+    Astro::SIMBAD::Query:          0
+    Astro::SpaceTrack:             0.016
+    Date::Manip:                   1.14
+    SOAP::Lite:                    0
     XML::Parser:                   0
 
 distribution_type: module
