@@ -29,6 +29,7 @@ use Time::Local;
 use UNIVERSAL qw{can};
 
 my ($clipboard_unavailable, $io_string_unavailable,
+	$lwp_unavailable,
 	$simbad_unavailable, $soap_unavailable,
 	$spacetrack_unavailable, $xml_parser_unavailable);
 BEGIN {
@@ -37,6 +38,8 @@ BEGIN {
 Error - You need to install the Astro::SpaceTrack module version 0.016
         or higher if you wish to use the st command.
 eod
+    eval "use LWP::UserAgent";
+    $lwp_unavailable = $@;
     eval "use Astro::SIMBAD::Query";
     $simbad_unavailable = $@;
     eval "use SOAP::Lite";
@@ -52,7 +55,7 @@ $clipboard_unavailable = $IO::Clipboard::clipboard_unavailable;
 #	Initialization
 #
 
-$VERSION = '0.005';
+$VERSION = '0.006';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -89,6 +92,7 @@ my %parm = (
     appulse => 0,
     autoheight => 1,
     background => 1,
+    country => 'us',
     date_format => '%a %d-%b-%Y',
     debug => 0,
     echo => 0,
@@ -97,7 +101,7 @@ my %parm = (
     geometric => 1,
     horizon => 20,	# Degrees
     lit => 1,
-    local_coord => 'azel',
+    local_coord => 'azel_rng',
     model => 'model',
     prompt => 'satpass>',
     simbad_url => 'simbad.harvard.edu',
@@ -117,6 +121,7 @@ my %mutator = (
     appulse => \&_set_angle,
     autoheight => \&_set_unmodified,
     background => \&_set_unmodified,
+    country => \&_set_unmodified,
     date_format => \&_set_unmodified,
     debug => \&_set_unmodified,
     echo => \&_set_unmodified,
@@ -356,7 +361,7 @@ eod
     {	# Begin local symbol block.
 	local @ARGV = @args;
         Getopt::Long::Configure (@{$cmdconfig{$verb} ||= ['permute']});
-	GetOptions (\%cmdopt, qw{clipboard debug}, @{$cmdlgl{$verb} ||= []});
+	GetOptions (\%cmdopt, qw{clipboard debug time}, @{$cmdlgl{$verb} ||= []});
 	@args = @ARGV;
 	}
     $cmdopt{_redirection} = $cmdopt{clipboard} ? '-clipboard' : $redout;
@@ -398,9 +403,17 @@ eod
 
       elsif (can (__PACKAGE__, $verb)) {
 	no strict qw{refs};
+	my $start_time = time ();
+	$SIG{INT} = sub {die "\nInterrupted by user.\n"};
 	eval {&$verb (@args)};
+	$SIG{INT} = 'DEFAULT';
+	my $end_time = time ();
 	use strict qw{refs};
 	$@ and warn $@;
+	$cmdopt{time} and print <<eod;
+Information - Elapsed time for command is @{[$end_time - $start_time
+	]} seconds.
+eod
 	}
 
 #	Else, complain about the unrecognized verb.
@@ -428,6 +441,10 @@ print "\n";
 #		the specified day(s)
 #
 
+BEGIN {
+$cmdlgl{almanac} = [qw{horizon|rise|set transit twilight quarter}];
+}
+
 sub almanac {
 
 my $dtfmt = "$parm{date_format} $parm{time_format}";
@@ -437,11 +454,9 @@ my $almanac_end = _parse_time (shift || '+1');
 $almanac_start >= $almanac_end and die <<eod;
 Error - End time must be after start time.
 eod
-$parm{height} && $parm{latitude} && $parm{longitude} or
-    die <<eod;
-Error - Can not calculate almanac data without setting height,
-	latitude, and longitude.
-eod
+_check_station ();
+
+my $all = 1 unless grep{$cmdopt{$_}} qw{horizon transit twilight quarter};
 
 #	Build an object representing our ground location.
 
@@ -485,6 +500,7 @@ eod
 my $last = '';
 foreach (sort {$a->[0] <=> $b->[0]} @almanac) {
     my ($time, $event, $detail, $descr) = @$_;
+    next unless $all || $cmdopt{$event};
     $descr = ('End ', 'Begin ')[$detail] . $id if $event eq 'twilight';
     my $day = strftime $parm{date_format}, localtime $time;
     print "$day\n" if $day ne $last;
@@ -580,8 +596,17 @@ eod
 
 ########################################################################
 #
-#	geocode () - Get lat/long from rpc.geocoder.us
+#	geocode () - Get latitude and longitude.
 #
+#	The arguments are the location, and an optional country code,
+#	which defaults to the 'country' parameter. All this does is
+#	dispatch geocode_$country if it exists, or fails if it does not.
+
+#	Yes, it would be nice to be able to parse the country code off
+#	the end of the address, but conflicts between U.S. Postal state
+#	codes and ISO 3166 country codes abound, running from
+#	    AL = Alabama (U.S.) or Albania (ISO) through
+#	    VA = Virginia (U.S.) or Vatican City (ISO).
 
 #	In addition to the global options, the geocode verb takes -all
 #	(for the benefit of height() if called) and -height (to negate
@@ -591,12 +616,95 @@ BEGIN {
 $cmdlgl{geocode} = [qw{all height}];
 }
 
-#	Here is the subroutine proper.
+#	Here is the subroutine proper. It is just a dispatcher.
 
 sub geocode {
+my $cc = lc ($_[1] || $parm{country});
+my $handler = "geocode_$cc";
+die <<eod unless __PACKAGE__->can ($handler);
+Error - I have no idea how to geocode a location in country code
+        '$cc'. The only known country codes at the moment are
+	@{[join ', ', _find_suffixes ('geocode_')]}
+eod
+goto \&{$handler};
+}
+
+########################################################################
+#
+#	geocode_ca () get lat/long from geocoder.ca
+#
+
+sub geocode_ca {
+$lwp_unavailable and die <<eod;
+Error - You need to install the LWP::UserAgent module if you wish to
+        use the geocode_ca command.
+eod
+$xml_parser_unavailable and die <<eod;
+Error - You need to install the XML::Parser module if you wish to use
+        the geocode_ca command.
+eod
+
+my $set_loc = @_;
+my $loc = shift @_ || $parm{location};
+
+#	Manufacture an LWP::UserAgent object.
+
+my $ua = LWP::UserAgent->new ();
+foreach my $url (qw{http://geocoder.ca/ http://backup-geocoder.ca/}) {
+    my $rslt = $ua->post  ($url,
+	{locate => $loc, geoit => 'XML'});
+    next unless $rslt->is_success ();
+    my $psr = XML::Parser->new (Style => 'Stream', Pkg => 'GeocoderCA');
+    my @rslt = $psr->parse ($rslt->content);
+    if (@rslt == 1) {
+	$parm{location} = $loc if $set_loc;
+	@parm{qw{latitude longitude}} = @{$rslt[0]};
+	print "\n";
+	show (($set_loc ? 'location' : ()), qw{latitude longitude});
+	_geocode_height ();
+	last;
+	}
+      elsif (@rslt) {
+	die <<eod;
+Error - Too many results.
+eod
+	}
+      else {
+	die <<eod;
+Error - No results.
+eod
+	}
+    }
+}
+
+########################################################################
+#
+#	geocode_us () get lat/long from rpc.geocoder.us
+#
+
+#	The options are those documented with geocode().
+
+#	We have the following synonyms, based on the fact that ISO 3166
+#	defines as separate countries territories of the U.S. that may
+#	be covered by the census database.
+
+no warnings qw{once};
+INIT {
+*geocode_as = \&geocode_us;	# American Samoa
+*geocode_fm = \&geocode_us;	# Federated States of Micronesia
+*geocode_gu = \&geocode_us;	# Guam
+*geocode_mh = \&geocode_us;	# Marshall Islands
+*geocode_mp = \&geocode_us;	# Northern Mariana Islands
+*geocode_pr = \&geocode_us;	# Puerto Rico
+*geocode_pw = \&geocode_us;	# Palau
+*geocode_vi = \&geocode_us;	# Virgin Islands
+}
+use warnings qw{once};
+
+sub geocode_us {
 $soap_unavailable and die <<eod;
 Error - You need to install the SOAP::Lite module if you wish to use
-        the geocode command.
+        the geocode_us command.
 eod
 
 my $set_loc = @_;
@@ -641,9 +749,17 @@ if (@$rslt == 1) {
     @parm{qw{latitude longitude}} = @{$rslt->[0]}{qw{lat long}};
     print "\n";
     show (($set_loc ? 'location' : ()), qw{latitude longitude});
-    $cmdopt{height} ? !$parm{autoheight} : $parm{autoheight} and
-	height ();
+    _geocode_height ();
     }
+}
+
+#	_geocode_height () is a helper subroutine to get the caller
+#	from one of the geocode_* routines to the proper height_*
+#	routine.
+
+sub _geocode_height {
+$cmdopt{height} ? !$parm{autoheight} : $parm{autoheight} and
+	height (_get_suffix ('geocode_', 2));
 }
 
 
@@ -663,6 +779,34 @@ $cmdlgl{height} = [qw{all}];
 #	Here is the height() subroutine itself.
 
 sub height {
+my $cc = pop @_ if @_ % 2;
+$cc ||= $parm{country};
+$cc = lc $cc;
+my $handler = "height_$cc";
+die <<eod unless __PACKAGE__->can ($handler);
+Error - I have no idea how to get the height of a location in country
+        code '$cc'. The only known country codes at the moment are
+	@{[join ', ', _find_suffixes ('height_')]}
+eod
+goto \&{$handler};
+}
+
+no warnings qw{once};
+INIT {
+*height_af = \&height_us;	# Afghanistan (believe it or not).
+*height_as = \&height_us;	# American Samoa
+*height_ca = \&height_us;	# Canada. U.S. has North American data
+*height_fm = \&height_us;	# Federated States of Micronesia
+*height_gu = \&height_us;	# Guam
+*height_mh = \&height_us;	# Marshall Islands
+*height_mp = \&height_us;	# Northern Mariana Islands
+*height_pr = \&height_us;	# Puerto Rico
+*height_pw = \&height_us;	# Palau
+*height_vi = \&height_us;	# Virgin Islands
+}
+use warnings qw{once};
+
+sub height_us {
 $soap_unavailable and die <<eod;
 Error - You need to install the SOAP::Lite module if you wish to use
         the height command.
@@ -684,6 +828,7 @@ local $USGSElevationData::debug = 1 if $cmdopt{debug};
 #	Manufacture a SOAP::Lite object appropriate to the installed
 #	version of SOAP::Lite.
 
+$cmdopt{debug} and SOAP::Trace->import ('all');
 my $soap = _soapdish ('http://gisdata.usgs.gov/XMLWebServices/',
     'http://gisdata.usgs.gov/XMLWebServices/TNM_Elevation_Service.asmx');
 
@@ -691,7 +836,9 @@ my $soap = _soapdish ('http://gisdata.usgs.gov/XMLWebServices/',
 #	because they're using .NET.
 
 my $rslt;
-my $xmlns = 'http://gisdata.usgs.net/XMLWebServices/';
+##my $xmlns = 'http://gisdata.usgs.net/XMLWebServices/';
+my $xmlns = 'http://gisdata.usgs.gov/XMLWebServices/';
+
 if ($cmdopt{all}) {
     $rslt = $soap->call (SOAP::Data->name ('getAllElevations')->attr (
 		{xmlns => $xmlns}) =>
@@ -710,6 +857,8 @@ if ($cmdopt{all}) {
 	SOAP::Data->new (name => 'Elevation_Only', type => 'string', value => 'false'),
 	)->result;
     }
+undef $soap;
+$cmdopt{debug} and SOAP::Trace->import ('-all');
 
 #	Parse our result. This is not straightforward either, because
 #	they decided to encode the result in XML, but they omit one or
@@ -735,7 +884,9 @@ if ($rslt) {
 	    print "Warning - Supplying missing end tag $endtag\n";
 	$rslt .= $endtag;
 	}
+    $cmdopt{debug} and print 'Parsing: ', $rslt, "\n";
     my $psr = XML::Parser->new (Style => 'Stream', Pkg => 'USGSElevationData');
+##    my $psr = XML::Parser->new (Style => 'Debug', Pkg => 'USGSElevationData');
     $rslt = $psr->parse ($rslt);
     }
   else {
@@ -922,10 +1073,10 @@ my $pass_end = _parse_time (shift || '+7');
 $pass_start >= $pass_end and die <<eod;
 Error - End time must be after start time.
 eod
-@bodies && $parm{height} && $parm{latitude} && $parm{longitude} or
-    die <<eod;
-Error - Can not calculate satellite pass without setting height,
-        latitude, longitude, and at least one body.
+_check_station ();
+@bodies or die <<eod;
+Error - Can not calculate satellite pass without loading at least one
+        body.
 eod
 my $pass_step = shift || 60;
 my $timlen = max (
@@ -1172,7 +1323,8 @@ foreach my $tle (@bodies) {
 		print "$temp\n" if $temp ne $day;
 		$day = $temp;
 		my ($lat, $long, $alt) = $pt->[4]->geodetic ();
-		printf LINFMT, strftime ($parm{time_format}, localtime $pt->[0]),
+		printf LINFMT, strftime ($parm{time_format},
+			localtime floor ($pt->[0] + .5)),
 		    $lcfmt->($sta, $pt->[4]),
 		    rad2deg ($lat), rad2deg ($long), $alt,
 		    $lighting[$pt->[7]], $pt->[8] || '';
@@ -1285,10 +1437,17 @@ foreach my $body (@sky) {
 #		and sky at the given time.
 #
 
+BEGIN {
+$cmdlgl{position} = [qw{realtime}];
+}
+
 sub position {
-my $time = $_[0] ? _parse_time (shift) : time ();
+my $time = _parse_time (shift);
+my $endtm = _parse_time (shift || ($cmdopt{realtime} ? '+10' : ''));
+my $interval = shift || ($cmdopt{realtime} ? 10 : 60);
 my $dtfmt = "$parm{date_format} $parm{time_format}";
 my $lcfmt = \&{"_format_local_$parm{local_coord}"};
+_check_station ();
 
 
 #	Define the observing station.
@@ -1304,15 +1463,22 @@ my $sta = Astro::Coord::ECI->new (
 
 #	Print a header.
 
-printf <<eod, _format_location (), strftime ($dtfmt, localtime $time);
-%s%s
-            name @{[$lcfmt->()]}
+printf <<eod, _format_location ();
+%s            name @{[$lcfmt->()]}
 eod
 
-foreach my $body (@bodies, @sky) {
-    $body->universal ($time);
-    my $name = $body->get ('name') || $body->get ('id') || 'body';
-    printf "%16s %s\n", $name, $lcfmt->($sta, $body);
+my $when = time ();
+while ($time <= $endtm) {
+    print strftime ($dtfmt, localtime $time), "\n";
+    foreach my $body (@bodies, @sky) {
+	$body->universal ($time);
+	my $name = $body->get ('name') || $body->get ('id') || 'body';
+	printf "%16s %s\n", $name, $lcfmt->($sta, $body);
+	}
+    $when += $interval;
+    $time += $interval;
+    my $sleep = $when - time ();
+    sleep ($sleep) if $cmdopt{realtime} && $sleep > 0;
     }
 
 }
@@ -1388,21 +1554,17 @@ Astro::Coord::ECI->set (ellipsoid => $_[1]);
 $parm{$_[0]} = $_[1];
 }
 
-BEGIN {
-    my %legal = map {$_ => 1} qw{azel equatorial};
 
-    sub _set_local_coord {
-    die <<eod unless $legal {$_[1]};
+sub _set_local_coord {
+my $method = "_format_local_$_[1]";
+die <<eod unless __PACKAGE__->can ($method);
 Error - Illegal local coordinate specification. The only legal values
-        are @{[join ', ', map {"'$_'"} sort keys %legal]}
+        are @{[join ', ', _find_suffixes ('_format_local_')]}
 eod
-    $parm{$_[0]} = $_[1];
-    }
+$parm{$_[0]} = $_[1];
 }
 
-=for comment } help syntax highlighting editor.
-
-=cut
+sub _set_lowercase {$parm{$_[0]} = lc $_[1]}
 
 sub _set_perltime {
 $parm{$_[0]} = $_[1];
@@ -1434,9 +1596,15 @@ eod
 }
 
 sub _set_tz {
-$ENV{TZ} = $parm{$_[0]} = $_[1];
-$parm{$_[0]} = $_[1];
-Date_Init ("TZ=$_[1]") unless $parm{perltime};
+if ($_[1] || looks_like_number ($_[1])) {
+    $ENV{TZ} = $parm{$_[0]} = $_[1];
+    Date_Init ("TZ=$_[1]") unless $parm{perltime};
+    }
+  else {
+    $parm{$_[0]} = undef;
+    delete $ENV{TZ};
+    Date_Init ($tz_init) unless $parm{perltime};
+    }
 }
 
 sub _set_unmodified {$parm{$_[0]} = $_[1]}
@@ -1760,14 +1928,73 @@ eod
 
 #	Accessors and mutators are with show() and set() respectively.
 
+#	_check_station ();
+
+#	This subroutine throws an exception if the height, latitude, and
+#	longitude are not defined.
+
+sub _check_station {
+defined $parm{height} && defined $parm{latitude} &&
+    defined $parm{longitude} or die <<eod;
+Error - You must set height, latitude, and longitude to use this
+        function.
+eod
+}
+
+#	@suff = _find_suffixes ($prefix, $package)
+
+#	This subroutine traverses the symbol table of the given
+#	package, looking for subroutine names that start with the given
+#	prefix, and returns all suffixes (i.e. the part of the name
+#	that is not the prefix). Its intent is to find out, for the
+#	purpose of producing helpful error messages, what 'geocode_*'
+#	and 'height_*' subroutines are currently implemented. The
+#	package name defaults to the current package.
+
+sub _find_suffixes {
+my $prefix = shift;
+my $package = shift || __PACKAGE__;
+my $symtab = $package . '::';
+my $re = qr{^$prefix};
+my $len = length ($prefix);
+my @rslt;
+no strict qw{refs};
+foreach my $symbol (keys %$symtab) {
+use strict qw{refs};
+    next unless $symbol =~ m/$re/ && $package->can ($symbol);
+    push @rslt, substr ($symbol, $len);
+    }
+sort @rslt;
+}
+
 
 #	$string = _format_local_azel ($station, $body)
+
+#	This subroutine formats the elevation and azimuth of the body
+#	as seen from the station. If called with no arguments, it
+#	returns a suitable heading for this information.
+
+sub _format_local_azel {
+@_ or return ' elev  azim   ';
+@_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
+Programming error - _format_azel () must be called with either zero
+    or two arguments. If two, both must be Astro::Coord::ECI objects.
+eod
+my ($az, $el, $rng) = $_[0]->azel ($_[1]);
+sprintf "%5.1f %5.1f %-2s",
+    rad2deg ($el), rad2deg ($az),
+    $bearing[floor ($az/TWOPI * @bearing + .5) % @bearing];
+}
+
+
+#	$string = _format_local_azel_rng ($station, $body)
 
 #	This subroutine formats the elevation, azimuth, and range of
 #	the body as seen from the station. If called with no arguments,
 #	it returns a suitable heading for this information.
 
-sub _format_local_azel {
+sub _format_local_azel_rng {
 @_ or return ' elev  azim     range    ';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
     UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
@@ -1783,11 +2010,29 @@ sprintf "%5.1f %5.1f %-2s @{[$rng > 1e6 ? '%10.3e' : '%10.1f']}",
 
 #	$string = _format_local_equatorial ($station, $body)
 
+#	This subroutine formats the right ascension and declination of
+#	the body as seen from the station. If called with no arguments,
+#	it returns a suitable heading for this information.
+
+sub _format_local_equatorial {
+@_ or return 'right asc decl';
+@_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
+Programming error - _format_azel () must be called with either zero
+    or two arguments. If two, both must be Astro::Coord::ECI objects.
+eod
+my ($ra, $dec, $rng) = $_[0]->equatorial ($_[1]);
+sprintf "%s %5.1f",
+    _rad2hms ($ra), rad2deg ($dec);
+}
+
+#	$string = _format_local_equatorial_rng ($station, $body)
+
 #	This subroutine formats the right ascension, declination, and
 #	range of the body as seen from the station. If called with no
 #	arguments, it returns a suitable heading for this information.
 
-sub _format_local_equatorial {
+sub _format_local_equatorial_rng {
 @_ or return 'right asc decl  range    ';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
     UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
@@ -1837,6 +2082,21 @@ $st ||=
 }
 }	# End local symbol block.
 
+#	$suf = _get_suffix ($prefix, $backoff);
+
+#	Gets the suffix of the caller's name. All that this really does
+#	is to get the caller's name and use the length of the prefix
+#	argument to determine the number of characters to strip off the
+#	front. The optional $backoff argument says how many levels of
+#	call to back off; the default is 1, meaning to get the suffix
+#	of the caller.
+
+sub _get_suffix {
+my $rtn = (caller ($_[1] || 1))[3];
+$rtn =~ s/.*:://;
+$rtn = substr ($rtn, length ($_[0]));
+$rtn;
+}
 
 #	__PACKAGE__->_iridium_status ($text)
 
@@ -1961,13 +2221,14 @@ $string * $units{$units};
 #	Parses a time string in any known format. Strings with a
 #	leading "+" or "-" are assumed to be relative to the last
 #	explicit setting. Otherwise the time is assumed to be explicit,
-#	and passed to Date::Manip. The parsed time is returned. We
-#	die on an invalid time.
+#	and passed to Date::Manip. The parsed time is returned. If the
+#	time to be parsed is false (in the Perl sense) we return the
+#	current time. We die on an invalid time.
 
 BEGIN {	# Begin local symbol block.
 my $last_time_set = time ();
 sub _parse_time {
-my $time = shift;
+my $time = shift or return ($last_time_set = time ());
 my $rslt;
 if ($time =~ m/^([\+\-])\s*(\d+)(?:\s+(\d+)(?::(\d+)(?::(\d+))?)?)?/) {
     my $delta = ((($2 || 0) * 24 + ($3 || 0)) * 60 + ($4 || 0)) * 60 + ($5 || 0);
@@ -2291,6 +2552,8 @@ use Scalar::Util qw{looks_like_number};
 
 our $debug;
 
+{	# Establish variable context
+
 my @data;
 my $current = {};
 my $tag;
@@ -2326,6 +2589,65 @@ sub Text {
 $text = $_;
 }
 
+}	# End of variable context
+
+########################################################################
+
+#	The parser code for the geocoder.ca data gets its own namespace
+#	to avoid conflicts with the main code.
+
+package GeocoderCA;
+
+use Scalar::Util qw{looks_like_number};
+
+our $debug;
+
+{	# Establish variable context
+my @data;
+my $current = {};
+my $tag;
+my $text = '';
+my %interest;
+my ($error, $description);
+$current = {};
+BEGIN {
+    %interest = (
+	code => sub {$error = $_[1]},
+	description => sub {$description = $_[1]},
+	latt => sub {},
+	longt => sub {push @data, $current
+		if looks_like_number ($_[1]);
+		$current = {};
+		}
+	);
+    }
+
+sub EndDocument {
+die <<eod if $error;
+Error - geocoder.ca error code $error
+        $description
+eod
+map {[$_->{latt}, $_->{longt}]} @data;
+}
+
+sub EndTag {
+my ($tag) = $_ =~ m|</(.*)>|;
+$tag = lc $tag;
+my $hdlr = $interest{$tag} or return;
+$debug and print "Debug EndTag -- <$tag>$text</$tag>\n";
+$current->{$tag} = $text;
+$hdlr->($tag, $text);
+}
+
+sub StartDocument {@data = ()}
+
+sub StartTag {}
+
+sub Text {
+$text = $_;
+}
+
+}	# End variable context
 
 ########################################################################
 
@@ -2395,6 +2717,8 @@ macros can be defined to issue frequently-used commands.
  satpass> # We're done
  satpass> exit
 
+=for comment help syntax-highlighting editor "
+
 =head1 DETAILS
 
 The B<satpass> script provides satellite visibility predictions, given
@@ -2452,24 +2776,39 @@ list, and predict satellite passes.
 The command execution loop supports command continuation, which is
 specified by placing a trailing '\' on the line to be continued.
 
-=for comment ' help syntax-highlighting editor that does not understand POD
-
-It also supports a pseudo output redirection, by placing ">filename"
-(for a new file) or ">>filename" (to append to an existing file)
+It also supports a pseudo output redirection, by placing '>filename'
+(for a new file) or '>>filename' (to append to an existing file)
 somewhere on the command line. See the L</SYNOPSIS> for an example.
 
-In addition, any command can place text on the clipboard if the
--clipboard qualifier is specified. This qualifier will be ignored
-if -clipboard is already in effect. This functionality requires the
-availability of the Win32::Clipboard module under MSWin32, the pbcopy
-command under darwin (and any Mac OS X I know of comes with pbcopy and
-pbpaste), or the xclip command (available from
-L<http://freshmeat.net/projects/xclip>) under any other operating system.
-The -clipboard qualifier can be abbreviated. Currently, the minimum
-abbreviation is "-c", but this may change if other conflicting qualifiers
-are added. Command qualifiers may appear anywhere in the command unless
-otherwise documented with the specific command ('system' being the only
-exception at the moment).
+In addition, all commands support the following options:
+
+-clipboard places the output of the command on the clipboard. This
+will be discussed more below.
+
+-debug is accepted but not supported - that is, the author makes
+no claims of what will happen if you assert it, and reserves the
+right to change this behaviour without warning. It is really a
+development aid.
+
+-time causes the elapsed time of the command in seconds to be
+displayed. This is another development aid.
+
+Individual commands may have options specific to them. Option names
+may be abbreviated, provided the abbreviation is unique among all
+options valid for that command. They may appear anywhere in the
+command line unless otherwise documented with the specific command
+('system' being the only exception at the moment).
+
+If the -clipboard option is asserted, output to standard out will
+be placed on the clipboard. This output will not appear on the
+clipboard until the command completes.
+
+The clipboard functionality requires the availability of the
+Win32::Clipboard module under MSWin32 (standard with ActivePerl), the
+pbcopy command under darwin (and any Mac OS X I know of comes with
+pbcopy and pbpaste), or the xclip command (available from
+L<http://freshmeat.net/projects/xclip>) under any other operating
+system.
 
 The clipboard functionality is implemented as a singleton object,
 so that if you redirect output away from the clipboard and then
@@ -2551,6 +2890,22 @@ settings (see L</PARAMETERS> below).
 
 The output is in chronological order.
 
+This command supports the following options:
+
+-horizon specifies that rise and set times are reported. -rise and -set
+are both synonyms for this; -rise also reports when the bodies set, and
+vice versa.
+
+-quarter specifies that quarters are reported.
+
+-transit specifies that transits are reported. This includes transits
+below the observer (e.g. local midnight), if these are generated.
+
+-twilight specifies that the beginning and end of twilight are
+reported.
+
+By default, all events are reported.
+
 The start_time defaults to 'today midnight', and the end_time to '+1'.
 
 See L</SPECIFYING TIMES> below for how to specify times.
@@ -2618,7 +2973,91 @@ is set from the value of the parameter, and will track changes in it.
 
 =for html <a name="geocode"></a>
 
-=item geocode location
+=item geocode location country_code
+
+This command attempts to look up the latitude and longitude of the
+given location in the given country. The country is an ISO 3166
+two-character country code, and defaults to the contents of the
+L<country|/country> parameter.
+
+This command actually works by dispatching to one of the following
+geocode_* commands, which may also be invoked explicitly. In fact,
+it is the existence of such a command that makes a given country
+code work.
+
+Yes, it would be nice to simply parse the country code off the end
+of the location, but unfortunately there are many conflicts between
+the ISO 3166 country codes and the U.S. Postal Service state codes
+and Canadian province codes, ranging from AL (either Albania or
+Alabama) through PE (either Peru or Prince Edward Island) to VA
+(either Vatican City or Virginia).
+
+=for html <a name="geocode_as"></a>
+
+=item geocode_as location
+
+Amercan Samoa is handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_ca"></a>
+
+=item geocode_ca location
+
+This command attempts to look up the given location (either street
+address or street intersection) at L<http://geocoder.ca/>. The results
+of the lookup are displayed. If no location is specified, it looks up
+the value of the L<location|/location> parameter.
+
+If exactly one valid result is returned, the latitude and longitude
+of the observer are set to the returned values, and the name of
+the location of the observer is set to the location passed to the
+command.
+
+Because of restrictions on the use of the Geocoder.ca site, you may not
+use this command for commercial purposes.
+
+I currently have no source for height information in Canada. Attempts
+to acquire it will result in a warning.
+
+=for html <a name="geocode_fm"></a>
+
+=item geocode_fm location
+
+The Federated States of Micronesia are handled by
+L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_gu"></a>
+
+=item geocode_gu location
+
+Guam is handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_mh"></a>
+
+=item geocode_mh location
+
+The Marshall Islands are handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_mp"></a>
+
+=item geocode_mp location
+
+The Northern Mariana Islands are handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_pr"></a>
+
+=item geocode_pr location
+
+Puerto Rico is handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_pw"></a>
+
+=item geocode_pw location
+
+Palau is handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="geocode_us"></a>
+
+=item geocode_us location
 
 This command attempts to look up the given location (either street
 address or street intersection) at L<http://geocoder.us/>. The results
@@ -2640,7 +3079,7 @@ If the location contains whitespace, it must be quoted. Example:
 
  satpass> geocode '1600 pennsylvania ave washington dc'
 
-Because of restrictions on the use of the Geocode.us site, you may not
+Because of restrictions on the use of the Geocoder.us site, you may not
 use this command for commercial purposes.
 
 If you wish to use this command, you must install the B<SOAP::Lite>
@@ -2650,9 +3089,93 @@ B<Caveat:> The geocoder.us web site gets its data from the U.S. Census
 Bureau's TIGER/LineE<reg> database. They add their opinion that it tends to
 be buggy and not to cover rural areas well.
 
-=for comment " help syntax-highlighting editor that does not understand POD
+=for html <a name="geocode_vi"></a>
 
-=item height latitude longitude
+=item geocode_as location
+
+The U.S. Virgin Islands are handled by L<geocode_us|/geocode_us>.
+
+=for html <a name="height"></a>
+
+=item height latitude longitude country
+
+This command attempts to look up the height above sea level at the
+given latitude and longitude in the given country. The country is an
+ISO 3166 two-character country code, and defaults to the contents of the
+L<country|/country> parameter.
+
+Yes, technically country is redundant given latitude and longitude, but
+I lacked a means to take advantage of this in practice.
+
+This command actually works by dispatching to one of the following
+height_* commands, which may also be invoked explicitly. In fact,
+it is the existence of such a command that makes a given country
+code work.
+
+The latitude and longitude can be omitted, in which case the current
+L<latitude|/latitude> and L<longitude|/longitude> parameters are
+used.
+
+=for html <a name="height_af"></a>
+
+=item height_af latitude longitude
+
+Afghanistan is handled by L<height_us|/height_us>, since this is
+(supposedly) covered by the U.S. Geological Survey's Afghanistan
+Digital Elevation Model.
+
+=for html <a name="height_as"></a>
+
+=item height_as latitude longitude
+
+American Samoa is handled by L<height_us|/height_us>.
+
+=for html <a name="height_ca"></a>
+
+=item height_ca latitude longitude
+
+Canada is handled by L<height_us|/height_us>, since the U.S. Geological
+Survey dataset includes all of North America.
+
+=for html <a name="height_fm"></a>
+
+=item height_fm latitude longitude
+
+The Federated States of Micronesia are handled by L<height_us|/height_us>.
+
+=for html <a name="height_gu"></a>
+
+=item height_gu latitude longitude
+
+Guam is handled by L<height_us|/height_us>.
+
+=for html <a name="height_mh"></a>
+
+=item height_mh latitude longitude
+
+The Marshall Islands are handled by L<height_us|/height_us>.
+
+=for html <a name="height_mp"></a>
+
+=item height_mp latitude longitude
+
+The Northern Mariana Islands are handled by L<height_us|/height_us>.
+
+=for html <a name="height_pr"></a>
+
+=item height_pr latitude longitude
+
+Puerto Rico is handled by L<height_us|/height_us>.
+
+=for html <a name="height_pw"></a>
+
+=item height_pw latitude longitude
+
+Palau is handled by L<height_us|/height_us>.
+
+=for html <a name="height_us"></a>
+
+=item height_us latitude longitude
 
 This command attempts to look up the height above sea level at the
 given latitude and longitude in the U.S. Geological Survey's EROS
@@ -2673,6 +3196,12 @@ file. You can use macros to define alternate locations if you
 want.
 
 =for comment ' help syntax-highlighting editor that does not understand POD
+
+=for html <a name="height_vi"></a>
+
+=item height_vi latitude longitude
+
+The U.S. Virgin Islands are handled by L<height_us|/height_us>.
 
 =for html <a name="help"></a>
 
@@ -2793,13 +3322,23 @@ waxing|waning crescent|gibbous.
 
 =for html <a name="position"></a>
 
-=item position time
+=item position start_time end_time interval
 
 This position gives the positions of all objects in the observing list
-and in the sky at the given time, the default being the current time.
+and in the sky between the given start_time and end_time, at the given
+interval. The default for both start_time and end_time is the current
+time, and the default interval is 60 (seconds).
+
 The position is given as seen by the observer, either as elevation,
 azimuth, and range, or as right ascension, declination, and range,
 depending on the setting of the L<local_coord|/local_coord> parameter.
+
+If you specify the -realtime qualifier, the the default end_time
+changes to '+10' (i.e. 10 days), and the default interval to 10
+(seconds). Also, the script sleeps between outputs, so the output is
+more or less as it happens, at least to the nearest second. You can
+break out of this by sending the script a SIGINT signal (typically
+by typing control/C).
 
 =for html <a name="quarters"></a>
 
@@ -3080,6 +3619,26 @@ appulse.
 
 The default is 1 (i.e. true).
 
+=for html <a name="country"></a>
+
+=item country (string)
+
+This parameter determines the default country for the L<geocode|/geocode>
+functionality. The intent is that it be an ISO 3166 two-character
+country code, but at the moment only 'CA' (Canada) and 'US' (United
+States of America) do anything useful.
+
+See L<http://www.iso.org/iso/en/prods-services/iso3166ma/index.html>
+for the current list of country codes. Note that these are B<not>
+always the same as the corresponding top-level geographic domain names
+(e.g. Great Britiain is 'GB' in ISO 3166 but has 'uk' as the top-level
+geographic domain name).
+
+The country codes are case-insensitive, since they will be converted to
+lower case for use.
+
+The default is 'us'.
+
 =for html <a name="date_format"></a>
 
 =item date_format (string)
@@ -3208,11 +3767,18 @@ This parameter determines what local coordinates of the object are
 displayed by the L<pass|/pass> and L<position|/position> commands.
 The only legal values are:
 
-azel - displays azimuth, elevation, and range;
+azel - displays elevation and azimuth;
 
-equatorial - displays right ascension, declination, and range.
+azel_rng - displays elevation, azimuth, and range;
 
-The default is 'azel'.
+equatorial - displays right ascension and declination.
+
+equatorial_rng - displays right ascension, declination, and range.
+
+The default is 'azel_rng'.
+
+B<Note that prior to version 0.005_04, the 'azel' and 'equatorial'
+formats included range.>
 
 =for html <a name="location"></a>
 
@@ -3518,9 +4084,12 @@ The only command qualifiers are
 =item -clipboard
 
 which causes all output to go to the clipboard. Use of this qualifier
-requires module Win32::Clipboard under MSWin32, or Clipboard under any
-other operating system. This script will die if the requisite module is
-not available.
+requires module Win32::Clipboard under MSWin32 (standard with
+ActivePerl), the 'pbcopy' command under Darwin (standard with Mac OS
+X), or the xclip command
+(available from L<http://freshmeat.net/projects/xclip>) under any other
+operating system. This script will die if the requisite module is not
+available.
 
 =item -filter
 

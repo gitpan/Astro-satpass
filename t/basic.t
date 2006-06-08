@@ -8,7 +8,7 @@ use POSIX qw{strftime floor};
 use Test;
 use Time::Local;
 
-BEGIN {plan tests => 14}
+BEGIN {plan tests => 18}
 ##use constant ASTRONOMICAL_UNIT => 149_597_870; # Meeus, Appendix 1, pg 407
 ##use constant EQUATORIALRADIUS => 6378.14;	# Meeus page 82.
 ##use constant PERL2000 => timegm (0, 0, 12, 1, 0, 100);
@@ -222,4 +222,42 @@ foreach ([timegm (0, 0, 0, 10, 3, 1987), (36.850 / 60 + 26) / 60 + 23],
 #     Tolerance: $tolerance
 eod
     ok (abs (($got - $expect) / $expect) < $tolerance);
+    }
+
+
+#	Test 15: Light intensity to magnitude.
+#	Tests: intensity_to_magnitude
+
+#	Based on Meeus' example 56.e.
+
+foreach ([500, -6.75, 0.01]) {
+    $test++;
+    my ($ratio, $expect, $tolerance) = @$_;
+    my $got = intensity_to_magnitude ($ratio);
+    print <<eod;
+# Test $test: Light intensity to magnitude
+#      Expected: $expect
+#           Got: $got
+#     Tolerance: $tolerance
+eod
+    ok (abs ($got - $expect) <= $tolerance);
+    }
+
+#	Tests 16 - 18: Atmospheric extinction
+#	Tests: atmospheric_extinction
+
+#	Based on Green's extinction table 1a
+
+foreach ([80, 0, 1.59], [45, .5, 0.34], [1, 1, 0.21]) {
+    $test++;
+    my ($Z, $height, $expect) = @$_;
+    my $elevation = deg2rad (90 - $Z);
+    my $got = atmospheric_extinction ($elevation, $height);
+    print <<eod;
+# Test $test: Atmospheric extinction
+#    Conditions: Z = $Z, height = $height
+#      Expected: $expect
+#           Got: $got
+eod
+    ok (abs ($got - $expect) <= .01);
     }
