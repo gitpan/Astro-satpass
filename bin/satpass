@@ -1,9 +1,9 @@
 #!/usr/local/bin/perl
 
+package Astro::satpass;
+
 use strict;
 use warnings;
-
-use vars qw{$VERSION};
 
 use Astro::Coord::ECI;
 use Astro::Coord::ECI::Moon;
@@ -12,6 +12,7 @@ use Astro::Coord::ECI::Star;
 use Astro::Coord::ECI::TLE;
 use Astro::Coord::ECI::Utils qw{:all};
 
+use Carp qw{confess};
 use Config;
 use Data::Dumper;
 use Date::Manip;
@@ -22,6 +23,7 @@ use List::Util qw{max};
 use Pod::Usage;
 use POSIX qw{floor strftime};
 use Scalar::Util qw{looks_like_number};
+use Storable ();
 use Term::ReadLine;
 use Text::Abbrev;
 use Text::ParseWords;
@@ -34,8 +36,8 @@ my ($clipboard_unavailable, $io_string_unavailable,
 	$spacetrack_unavailable, $xml_parser_unavailable);
 BEGIN {
     eval "use Astro::SpaceTrack";
-    $spacetrack_unavailable = <<eod if $@ || Astro::SpaceTrack->VERSION < 0.016;
-Error - You need to install the Astro::SpaceTrack module version 0.016
+    $spacetrack_unavailable = <<eod if $@ || Astro::SpaceTrack->VERSION < 0.017;
+Error - You need to install the Astro::SpaceTrack module version 0.017
         or higher if you wish to use the st command.
 eod
     eval "use LWP::UserAgent";
@@ -55,7 +57,7 @@ $clipboard_unavailable = $IO::Clipboard::clipboard_unavailable;
 #	Initialization
 #
 
-$VERSION = '0.006';
+our $VERSION = '0.007';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -174,10 +176,7 @@ my $inifil = $^O eq 'MSWin32' || $^O eq 'VMS' || $^O eq 'MacOS' ?
 $inifil = $^O eq 'VMS' ? "SYS\$LOGIN:$inifil" :
     $^O eq 'MacOS' ? $inifil :
     $ENV{HOME} ? "$ENV{HOME}/$inifil" :
-    $ENV{LOGDIR} ? "$ENV{LOGDIR}/$inifil" : undef or warn <<eod;
-Warning - Can not find home directory. Initialization file will not be
-        executed.
-eod
+    $ENV{LOGDIR} ? "$ENV{LOGDIR}/$inifil" : undef;
 
 
 sub _format_location;	# Predeclare, so I do not need explicit STDOUT.
@@ -193,9 +192,7 @@ my $date_manip_fudge =
 
 my $rl = Term::ReadLine->new ('Predict satellite passes') if -t STDIN;
 my $fh = *STDIN;
-my @stdin;
-my @argstk;
-my @stdout;
+my @frame;
 my %alias = (
     '!' => 'system',
     '.' => 'source',
@@ -203,7 +200,8 @@ my %alias = (
     quit => 'exit',
     );
 
-GetOptions (\%opt, qw{clipboard filter}) or die <<eod;
+GetOptions (\%opt, qw{clipboard filter initialization_file=s}) or
+    die <<eod;
 
 Predict satellite visibility.
 
@@ -214,18 +212,60 @@ where the legal options are
   -clipboard
     Asserting this option causes all output to stdout to be captured
     and placed on the system clipboard. Command-line output redirection
-    is ignored. 
+    is ignored.
 
   -filter
-    Asserting this option supresses extraneous output, making satpass
+    Asserting this option suppresses extraneous output, making satpass
     behave more like a Unix filter.
+
+  -initialization_file filename
+    Initializes satpass from the named file. The default is
+    $inifil.
+
+Option names can be abbreviated, as long as the abbreviation is unique.
 
 $clipboard_unavailable
 eod
 
+$inifil || $opt{initialization_file} or warn <<eod;
+
+Warning - Can not find home directory, and no explicit initialization
+        file specified.
+eod
+if ($opt{initialization_file}) {
+    if (-e $opt{initialization_file}) {
+	$inifil = $opt{initialization_file};
+	}
+      else {
+	warn <<eod;
+
+Warning - File $opt{initialization_file} does not exist.
+        Initializing with $inifil
+eod
+	}
+    }
+
 $opt{clipboard} and select (IO::Clipboard->new ());
 
+my $exception;
+ref $Astro::satpass::Test::Hook eq 'CODE' and do {
+    $fh = Astro::satpass::Test->new () or die <<eod;
+Error - Failed to instantiate Astro::satpass::Test object.
+eod
+    select ($fh);
+    no warnings qw{once};
+    $exception = \$Astro::satpass::Test::Exception;
+    use warnings qw{once};
+    };
+
 Getopt::Long::Configure (qw{pass_through});	# Need because of relative time format.
+
+push @frame, {
+	args => [],
+	parm => {},
+	stdin => $fh,
+	stdout => select (),
+	};
 
 $opt{filter} or print <<eod;
 
@@ -253,22 +293,26 @@ my @line;
 my $cntind = '';
 while (1) {
 
+
+#	Select the default output
+
+    select ($frame[$#frame]{stdout});
+
+
 #	Get the next command, wherever it comes from.
 
-    my $buffer = @stdin ? <$fh> :
-	-t STDIN ?
+    my $buffer = @frame > 1 ? $fh->getline () :
+	-t $fh ?
 	    $rl ? $rl->readline ("$cntind$parm{prompt} ") :
-		do {print "\n$cntind$parm{prompt} "; <$fh>} :
-	    <$fh>;
+		do {print "\n$cntind$parm{prompt} "; $fh->getline ()} :
+	    $fh->getline ();
 
 #	If it was end-of-file, pop one level off the stack of input
 #	files. If it's empty, we exit the execution loop. Otherwise
 #	we select the proper STDOUT and redo the loop.
 
     defined $buffer or do {
-	last unless @stdin;
-	$fh = pop @stdin;
-	@stdout and select (pop @stdout);
+	defined ($fh = _frame_pop ()) or last;
 	redo;
 	};
 
@@ -303,12 +347,11 @@ while (1) {
 
     eval {$buffer =~ s/\$(?:(\w+)|\{(\w+)(?:\:(.*?))\}|(.))/
 	    $4 ? $4 : _sub_arg ($1 || $2, $3 || '',
-	    $argstk[scalar @stdin] || [])/mgex
+	    $frame[$#frame]->{args} || [])/mgex
 	    unless $buffer =~ m/^\s*macro\b/};
     $@ and do {
-	warn $@;
-	$fh = pop @stdin;
-	@stdout and select (pop @stdout);
+	$exception ? $$exception = $@ : warn $@;
+	defined ($fh = _frame_pop ()) or last;
 	redo;
 	};
 
@@ -319,7 +362,7 @@ while (1) {
 
 #	Echo the line, if this is selected.
 
-    $parm{echo} && (@stdin || !-t STDIN) and
+    $parm{echo} && (@frame > 1 || !-t $fh) and
 	print "$cntind$parm{prompt} $buffer\n";
 
 #	Pull the verb off by brute force, because we need to know what
@@ -337,8 +380,7 @@ while (1) {
 
 #	Do pseudo tilde expansion.
 
-    $redout =~ s%^(>+)~%$1 . (
-	$^O eq 'VMS' ? '/sys$login' : $ENV{HOME} || $ENV{LOGDIR})%e;
+    $redout =~ s/^(>+)(~.*)/ $1 . _tilde_expand ($2) /e;
 
 #	Special-case 'exit' to drop out of the input loop.
 
@@ -347,9 +389,10 @@ while (1) {
 #	Arbitrarily disallow syntactically invalid commands.
 
     $verb =~ m/^_/ || $verb =~ m/\W/ and do {
-	warn <<eod;
+	my $stuff = <<eod;
 Error - Verb '$verb' not recognized.
 eod
+	$exception ? ($$exception = $stuff) : warn $stuff;
 	next;
 	};
 
@@ -368,11 +411,10 @@ eod
 
 #	Preserve our current output, and redirect as and if specified.
 
-    push @stdout, select ();
     if ($cmdopt{clipboard}) {
 	$redout = '';
 	my $fh = eval {IO::Clipboard->new ()};
-	$@ and do {warn $@; next;};
+	$@ and do {$exception ? $$exception = $@ : warn $@; next;};
 	select ($fh) or die <<eod;
 Error - Failed to redirect output to clipboard.
         $!
@@ -409,7 +451,7 @@ eod
 	$SIG{INT} = 'DEFAULT';
 	my $end_time = time ();
 	use strict qw{refs};
-	$@ and warn $@;
+	$@ and $exception ? $$exception = $@ : warn $@;
 	$cmdopt{time} and print <<eod;
 Information - Elapsed time for command is @{[$end_time - $start_time
 	]} seconds.
@@ -419,14 +461,15 @@ eod
 #	Else, complain about the unrecognized verb.
 
       else {
-    warn <<eod;
+	my $stuff = <<eod;
 Error - Verb '$verb' not recognized.
 eod
+	$exception ? $$exception = $stuff : warn $stuff;
 	}
 
-#	End of command dispatching. Re-establish the old output.
 
-    @stdout and select (pop @stdout);
+#	End of command dispatching.
+
     }
 
 #	End of the input loop. Print a newline just in case we
@@ -518,8 +561,9 @@ foreach (sort {$a->[0] <=> $b->[0]} @almanac) {
 #
 
 sub cd {
-$_[0] ? chdir ($_[0]) || die <<eod : chdir () || die <<eod;
-Error - Can not cd to $_[0]
+my $expand = _tilde_expand ($_[0]) if $_[0];
+$expand ? chdir ($expand) || die <<eod : chdir () || die <<eod;
+Error - Can not cd to $expand
         $!
 eod
 Error - Can not cd to home
@@ -556,6 +600,26 @@ foreach my $tle (@bodies) {
 
 sub clear {
 @bodies = ();
+}
+
+
+########################################################################
+#
+#	drop ()  - remove the given bodies from the observing list.
+#
+
+sub drop {
+my @check = map {m/\D/ ? qr{@{[quotemeta $_]}}i : $_} @_;
+my @keep;
+DROP_LOOP:
+foreach my $tle (@bodies) {
+    my ($id, $name) = ($tle->get ('id'), $tle->get ('name') || '');
+    foreach my $test (@check) {
+	next DROP_LOOP if ref $test ? $name =~ m/$test/ : $id == $test;
+	}
+    push @keep, $tle;
+    }
+@bodies = @keep;
 }
 
 
@@ -613,7 +677,17 @@ eod
 #	the autoheight setting)
 
 BEGIN {
-$cmdlgl{geocode} = [qw{all height}];
+$cmdlgl{geocode} = [qw{all height retry_on_zero=i source_layer=s}];
+$cmdlgl{geocode_as} = $cmdlgl{geocode};
+$cmdlgl{geocode_ca} = $cmdlgl{geocode};
+$cmdlgl{geocode_fm} = $cmdlgl{geocode};
+$cmdlgl{geocode_gu} = $cmdlgl{geocode};
+$cmdlgl{geocode_mh} = $cmdlgl{geocode};
+$cmdlgl{geocode_mp} = $cmdlgl{geocode};
+$cmdlgl{geocode_pr} = $cmdlgl{geocode};
+$cmdlgl{geocode_pw} = $cmdlgl{geocode};
+$cmdlgl{geocode_us} = $cmdlgl{geocode};
+$cmdlgl{geocode_vi} = $cmdlgl{geocode};
 }
 
 #	Here is the subroutine proper. It is just a dispatcher.
@@ -684,23 +758,6 @@ eod
 
 #	The options are those documented with geocode().
 
-#	We have the following synonyms, based on the fact that ISO 3166
-#	defines as separate countries territories of the U.S. that may
-#	be covered by the census database.
-
-no warnings qw{once};
-INIT {
-*geocode_as = \&geocode_us;	# American Samoa
-*geocode_fm = \&geocode_us;	# Federated States of Micronesia
-*geocode_gu = \&geocode_us;	# Guam
-*geocode_mh = \&geocode_us;	# Marshall Islands
-*geocode_mp = \&geocode_us;	# Northern Mariana Islands
-*geocode_pr = \&geocode_us;	# Puerto Rico
-*geocode_pw = \&geocode_us;	# Palau
-*geocode_vi = \&geocode_us;	# Virgin Islands
-}
-use warnings qw{once};
-
 sub geocode_us {
 $soap_unavailable and die <<eod;
 Error - You need to install the SOAP::Lite module if you wish to use
@@ -753,6 +810,23 @@ if (@$rslt == 1) {
     }
 }
 
+#	We have the following synonyms, based on the fact that ISO 3166
+#	defines as separate countries territories of the U.S. that may
+#	be covered by the census database.
+
+no warnings qw{once};
+BEGIN {
+*geocode_as = \&geocode_us;	# American Samoa
+*geocode_fm = \&geocode_us;	# Federated States of Micronesia
+*geocode_gu = \&geocode_us;	# Guam
+*geocode_mh = \&geocode_us;	# Marshall Islands
+*geocode_mp = \&geocode_us;	# Northern Mariana Islands
+*geocode_pr = \&geocode_us;	# Puerto Rico
+*geocode_pw = \&geocode_us;	# Palau
+*geocode_vi = \&geocode_us;	# Virgin Islands
+}
+use warnings qw{once};
+
 #	_geocode_height () is a helper subroutine to get the caller
 #	from one of the geocode_* routines to the proper height_*
 #	routine.
@@ -773,7 +847,18 @@ $cmdopt{height} ? !$parm{autoheight} : $parm{autoheight} and
 #	first valid result is accepted.
 
 BEGIN {
-$cmdlgl{height} = [qw{all}];
+$cmdlgl{height} = [qw{all retry_on_zero=i source_layer=s}];
+$cmdlgl{height_af} = $cmdlgl{height};
+$cmdlgl{height_as} = $cmdlgl{height};
+$cmdlgl{height_ca} = $cmdlgl{height};
+$cmdlgl{height_fm} = $cmdlgl{height};
+$cmdlgl{height_gu} = $cmdlgl{height};
+$cmdlgl{height_mh} = $cmdlgl{height};
+$cmdlgl{height_mp} = $cmdlgl{height};
+$cmdlgl{height_pr} = $cmdlgl{height};
+$cmdlgl{height_pw} = $cmdlgl{height};
+$cmdlgl{height_us} = $cmdlgl{height};
+$cmdlgl{height_vi} = $cmdlgl{height};
 }
 
 #	Here is the height() subroutine itself.
@@ -791,20 +876,26 @@ eod
 goto \&{$handler};
 }
 
-no warnings qw{once};
-INIT {
-*height_af = \&height_us;	# Afghanistan (believe it or not).
-*height_as = \&height_us;	# American Samoa
-*height_ca = \&height_us;	# Canada. U.S. has North American data
-*height_fm = \&height_us;	# Federated States of Micronesia
-*height_gu = \&height_us;	# Guam
-*height_mh = \&height_us;	# Marshall Islands
-*height_mp = \&height_us;	# Northern Mariana Islands
-*height_pr = \&height_us;	# Puerto Rico
-*height_pw = \&height_us;	# Palau
-*height_vi = \&height_us;	# Virgin Islands
+########################################################################
+#
+#	height_ca () - Fetch the height above sea level in Canada.
+#
+#	We default the source layer to 'SRTM.C_1TO19_3', and redispatch
+#	to height_us ().
+
+sub height_ca {
+$cmdopt{debug} and warn "Debug - Calling height_ca()\n";
+$cmdopt{source_layer} ||= 'SRTM.C_1TO19_3';
+$cmdopt{retry_on_zero} = 3 unless defined $cmdopt{retry_on_zero};
+goto \&height_us;
 }
-use warnings qw{once};
+
+########################################################################
+#
+#	height_us () - Fetch the height above sea level in Canada.
+#
+#	The USGS has data for locations other than the USA, so other
+#	countries will be handled here as well.
 
 sub height_us {
 $soap_unavailable and die <<eod;
@@ -820,8 +911,12 @@ my $set_pos = @_;
 my $lat = @_ ? shift @_ : $parm{latitude};
 my $lon = @_ ? shift @_ : $parm{longitude};
 
+$cmdopt{source_layer} ||= -1;
+$cmdopt{retry_on_zero} ||= 0;
 $cmdopt{debug} and warn <<eod;
 Debug - Getting elevation for latitude $lat, longitude $lon
+        -source_layer $cmdopt{source_layer}
+	-retry_on_zero $cmdopt{retry_on_zero}
 eod
 local $USGSElevationData::debug = 1 if $cmdopt{debug};
 
@@ -839,26 +934,28 @@ my $rslt;
 ##my $xmlns = 'http://gisdata.usgs.net/XMLWebServices/';
 my $xmlns = 'http://gisdata.usgs.gov/XMLWebServices/';
 
-if ($cmdopt{all}) {
-    $rslt = $soap->call (SOAP::Data->name ('getAllElevations')->attr (
+my $tries = ($cmdopt{retry_on_zero} || 0) + 1;
+
+while (--$tries >= 0) {
+
+    if ($cmdopt{all}) {
+	$rslt = $soap->call (SOAP::Data->name ('getAllElevations')->attr (
 		{xmlns => $xmlns}) =>
-	SOAP::Data->new (name => 'X_Value', type => 'string',  value => $lon),
-	SOAP::Data->new (name => 'Y_Value', type => 'string', value => $lat),
-	SOAP::Data->new (name => 'Elevation_Units', type => 'string', value => 'METERS'),
-	)->result;
-    }
-  else {
-    $rslt = $soap->call (SOAP::Data->name ('getElevation')->attr (
+	    SOAP::Data->new (name => 'X_Value', type => 'string',  value => $lon),
+	    SOAP::Data->new (name => 'Y_Value', type => 'string', value => $lat),
+	    SOAP::Data->new (name => 'Elevation_Units', type => 'string', value => 'METERS'),
+	    )->result;
+	}
+      else {
+	$rslt = $soap->call (SOAP::Data->name ('getElevation')->attr (
 		{xmlns => $xmlns}) =>
-	SOAP::Data->new (name => 'X_Value', type => 'string',  value => $lon),
-	SOAP::Data->new (name => 'Y_Value', type => 'string', value => $lat),
-	SOAP::Data->new (name => 'Source_Layer', type => 'string',  value => -1),
-	SOAP::Data->new (name => 'Elevation_Units', type => 'string', value => 'METERS'),
-	SOAP::Data->new (name => 'Elevation_Only', type => 'string', value => 'false'),
-	)->result;
-    }
-undef $soap;
-$cmdopt{debug} and SOAP::Trace->import ('-all');
+	    SOAP::Data->new (name => 'X_Value', type => 'string',  value => $lon),
+	    SOAP::Data->new (name => 'Y_Value', type => 'string', value => $lat),
+	    SOAP::Data->new (name => 'Source_Layer', type => 'string',  value => $cmdopt{source_layer} || -1),
+	    SOAP::Data->new (name => 'Elevation_Units', type => 'string', value => 'METERS'),
+	    SOAP::Data->new (name => 'Elevation_Only', type => 'string', value => 'false'),
+	    )->result;
+	}
 
 #	Parse our result. This is not straightforward either, because
 #	they decided to encode the result in XML, but they omit one or
@@ -867,32 +964,39 @@ $cmdopt{debug} and SOAP::Trace->import ('-all');
 #	we have to examine the result and fix it up _before_ calling
 #	XML::Parser.
 
-if ($rslt) {
+    if ($rslt) {
 
-   $cmdopt{debug} and print 'Result: ', $rslt, "\n";
+	$cmdopt{debug} and print 'Result: ', $rslt, "\n";
 
-    my @endtag;
-    while ($rslt =~ m/(<\w+.*?>)/g) {
-	my $begintag = $1;
-	(my $endtag = $begintag) =~ s|<|</|;
-	$endtag =~ s/\s+.*/>/;
-	last if $rslt =~ m/$endtag/i;
-	unshift @endtag, $endtag;
+	my @endtag;
+	while ($rslt =~ m/(<\w+.*?>)/g) {
+	    my $begintag = $1;
+	    (my $endtag = $begintag) =~ s|<|</|;
+	    $endtag =~ s/\s+.*/>/;
+	    last if $rslt =~ m/$endtag/i;
+	    unshift @endtag, $endtag;
+	    }
+	if (my $endtag = join '', @endtag) {
+	    $cmdopt{debug} and
+		print "Warning - Supplying missing end tag $endtag\n";
+	    $rslt .= $endtag;
+	    }
+	$cmdopt{debug} and print 'Parsing: ', $rslt, "\n";
+	my $psr = XML::Parser->new (Style => 'Stream', Pkg => 'USGSElevationData');
+	$rslt = $psr->parse ($rslt);
+	last unless $rslt == 0;
+	sleep 2 if $tries;
 	}
-    if (my $endtag = join '', @endtag) {
-	$cmdopt{debug} and
-	    print "Warning - Supplying missing end tag $endtag\n";
-	$rslt .= $endtag;
+      else {
+	$cmdopt{debug} and print "No result from http://gisdata.usgs.gov/\n";
+	$rslt = undef;
+	last;
 	}
-    $cmdopt{debug} and print 'Parsing: ', $rslt, "\n";
-    my $psr = XML::Parser->new (Style => 'Stream', Pkg => 'USGSElevationData');
-##    my $psr = XML::Parser->new (Style => 'Debug', Pkg => 'USGSElevationData');
-    $rslt = $psr->parse ($rslt);
+
     }
-  else {
-    $cmdopt{debug} and print "No result from http://gisdata.usgs.gov/\n";
-    $rslt = undef;
-    }
+
+undef $soap;
+$cmdopt{debug} and SOAP::Trace->import ('-all');
 
 #	If, after all the above shenannigans, we have a result, set
 #	the height (and latitude and longitude if not defaulted), and
@@ -915,6 +1019,20 @@ eod
     }
 
 }
+
+no warnings qw{once};
+BEGIN {
+*height_af = \&height_us;	# Afghanistan (believe it or not).
+*height_as = \&height_us;	# American Samoa
+*height_fm = \&height_us;	# Federated States of Micronesia
+*height_gu = \&height_us;	# Guam
+*height_mh = \&height_us;	# Marshall Islands
+*height_mp = \&height_us;	# Northern Mariana Islands
+*height_pr = \&height_us;	# Puerto Rico
+*height_pw = \&height_us;	# Palau
+*height_vi = \&height_us;	# Virgin Islands
+}
+use warnings qw{once};
 
 
 ########################################################################
@@ -1015,14 +1133,31 @@ if (@bodies) {
 
 sub load {
 foreach my $fn (@_) {
-    my $fh = FileHandle->new ("<$fn") or die <<eod;
-Error - Cannot open $fn.
+    my $expand = _tilde_expand ($fn);
+    my $fh = FileHandle->new ("<$expand") or die <<eod;
+Error - Cannot open $expand.
         $!
 eod
     push @bodies, Astro::Coord::ECI::TLE->parse (<$fh>);
     }
 }
 
+
+########################################################################
+#
+#	localize () - Localize parameter settings.
+#
+
+sub localize {
+foreach my $key (@_) {
+    $key =~ m/\W/ || $key =~ m/^_/ || !exists ($parm{$key}) and
+	die <<eod;
+Error - Parameter $key does not exist.
+eod
+    $frame[$#frame]{local_parm}{$key} = $parm{$key}
+	unless exists $frame[$#frame]{local_parm}{$key};
+    }
+}
 
 ########################################################################
 #
@@ -1202,15 +1337,21 @@ foreach my $tle (@bodies) {
 		my @time = (
 		    [_pass_zero_in ($data[0][0] - $step, $data[0][0],
 			sub {($sta->azel ($tle->universal ($_[0])))[1] >=
-			$effective_horizon})],
+			$effective_horizon}), 'Rise'],
 		    [_pass_zero_in ($data[$#data][0], $data[$#data][0] + $step,
 			sub {($sta->azel ($tle->universal ($_[0])))[1] <
-			$effective_horizon})],
+			$effective_horizon}), 'Set'],
 		    [_pass_zero_in ($data[0][0], $data[$#data][0],
 			sub {($sta->azel ($tle->universal ($_[0])))[1] >
-				($sta->azel ($tle->universal ($_[0] + 1)))[1]})],
+				($sta->azel ($tle->universal ($_[0] + 1)))[1]}),
+				'Max'],
 		    );
+		warn <<eod if $parm{debug};
 
+Debug - Computed @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[0][0]]} $time[0][1]
+                 @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[1][0]]} $time[1][1]
+                 @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[2][0]]} $time[2][1]
+eod
 
 #		Compute visibility changes.
 
@@ -1230,7 +1371,12 @@ foreach my $tle (@bodies) {
 				    $_[0] < $_[1]{suntim} ? 1 : 2 :
 				    $_[0] < $_[1]{suntim} ? 2 : 1;
 			    $illum == $evt->[7]
-			    }, {suntim => $suntim, rise => $rise})];
+			    }, {suntim => $suntim, rise => $rise}),
+			    $lighting[$evt->[7]]];
+			warn <<eod if $parm{debug};
+                 @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]} $lighting[$evt->[7]]
+                 @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[2][0]]} $time[2][1]
+eod
 		    }
 		  continue {
 		    $last = $evt;
@@ -1256,6 +1402,9 @@ foreach my $tle (@bodies) {
 		    next if $angle > $parm{appulse};
 		    push @time, [$when, sprintf ('%.1f from %s', $angle,
 			$body->get ('name') || $body->get ('id')), $body];
+			warn <<eod if $parm{debug};
+                $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]}
+eod
 		    }
 
 
@@ -1267,6 +1416,7 @@ foreach my $tle (@bodies) {
 #		Generate the full data for the exact events.
 
 		my ($suntim, $rise);
+		warn "Contents of \@time: ", Dumper (\@time) if $parm{debug};
 		foreach (sort {$a->[0] <=> $b->[0]} @time) {
 		    my @event = @$_;
 		    my $time = shift @event;
@@ -1278,7 +1428,7 @@ foreach my $tle (@bodies) {
 			$rise ? 1 : 2;
 		    push @data, [$time, $elev, $azm, $rng,
 			Astro::Coord::ECI->eci ($tle->eci (), $time),
-			undef, undef, $illum];
+			undef, undef, $illum, @event ? $event[0] : ()];
 		    }
 
 
@@ -1296,22 +1446,24 @@ foreach my $tle (@bodies) {
 
 #	    Figure out what the events are.
 
-	    $data[0][8] = 'Rise';
-	    $data[$#data][8] = 'Set';
-	    $data[$#data][1] = 0 if $data[$#data][1] < 0;
+	    unless ($parm{exact_event}) {
+		$data[0][8] = 'Rise';
+		$data[$#data][8] = 'Set';
+		$data[$#data][1] = 0 if $data[$#data][1] < 0;
 					# Because -.6 degrees
 					# (which we get because no atmospheric
 					# refraction below the horizon) looks funny.
-	    my ($last, $max);
-	    foreach my $pt (@data) {
-		$last or next;
-		$last->[1] > $pt->[1] and $max ||= $last;
-		$last->[7] != $pt->[7] and $pt->[8] ||= $lighting[$pt->[7]];
+		my ($last, $max);
+		foreach my $pt (@data) {
+		    $last or next;
+		    $last->[1] > $pt->[1] and $max ||= $last;
+		    $last->[7] != $pt->[7] and $pt->[8] ||= $lighting[$pt->[7]];
+		    }
+		continue {
+		    $last = $pt;
+		    }
+		$max and $max->[8] = 'Max';
 		}
-	      continue {
-		$last = $pt;
-		}
-	    $max and $max->[8] = 'Max';
 
 
 #	    Print the data for the pass.
@@ -1443,11 +1595,14 @@ $cmdlgl{position} = [qw{realtime}];
 
 sub position {
 my $time = _parse_time (shift);
-my $endtm = _parse_time (shift || ($cmdopt{realtime} ? '+10' : ''));
+my $endtm = _parse_time (shift || ($cmdopt{realtime} ? '+10' : '+0'));
 my $interval = shift || ($cmdopt{realtime} ? 10 : 60);
 my $dtfmt = "$parm{date_format} $parm{time_format}";
 my $lcfmt = \&{"_format_local_$parm{local_coord}"};
 _check_station ();
+my @lighting = qw{Shdw Lit Day};	# Duped from pass()
+my $twilight = $parm{_twilight};
+
 
 
 #	Define the observing station.
@@ -1460,20 +1615,32 @@ my $sta = Astro::Coord::ECI->new (
 	deg2rad ($parm{latitude}), deg2rad ($parm{longitude}),
 	$parm{height} / 1000);
 
+my $sun = Astro::Coord::ECI::Sun->new ();
 
 #	Print a header.
 
-printf <<eod, _format_location ();
-%s            name @{[$lcfmt->()]}
+printf <<eod, _format_location (),
+%s            name @{[$lcfmt->()]} %-*s illum
 eod
-
+	length (strftime $dtfmt, localtime time), 'epoch of data';
+ 
 my $when = time ();
 while ($time <= $endtm) {
     print strftime ($dtfmt, localtime $time), "\n";
     foreach my $body (@bodies, @sky) {
 	$body->universal ($time);
 	my $name = $body->get ('name') || $body->get ('id') || 'body';
-	printf "%16s %s\n", $name, $lcfmt->($sta, $body);
+	if ($body->isa ('Astro::Coord::ECI::TLE')) {
+	    my $illum = ($sta->azel ($body))[1] < 0 ? 10 :
+		($sta->azel ($sun->universal ($time)))[1] > $twilight ? 2 :
+		($body->azel ($sun))[1] > $body->dip() ? 1 : 0;
+	    printf "%16s %s %s %s\n", $name, $lcfmt->($sta, $body),
+		strftime ($dtfmt, localtime $body->get ('epoch')),
+		$lighting[$illum] || '';
+	    }
+	  else {
+	    printf "%16s %s\n", $name, $lcfmt->($sta, $body);
+	    }
 	}
     $when += $interval;
     $time += $interval;
@@ -1521,6 +1688,19 @@ foreach (sort {$a->[0] <=> $b->[0]} @data) {
     print strftime ($dtfmt, localtime $time), " $quarter\n";
     }
 
+}
+
+
+########################################################################
+#
+#	retrieve () - Reload the observing list using Storable::retrieve.
+#
+
+sub retrieve {
+my $fn = shift or die <<eod;
+Error - No file name specified.
+eod
+@bodies = @{Storable::retrieve (_tilde_expand ($fn))};
 }
 
 
@@ -1784,15 +1964,23 @@ eod
 #	source () - take commands from the specified file
 #
 
+BEGIN {
+$cmdlgl{source} = [qw{optional}];
+}
+
 sub source {
 my $fn = shift;
-my $hdl = ref $fn ? $fn : FileHandle->new ("<$fn") || die <<eod;
+my $hdl = ref $fn ? $fn : FileHandle->new ("<@{[_tilde_expand ($fn)]}") ||
+    ($cmdopt{optional} ? return : die <<eod);
 Error - Can not open $fn for input.
         $!
 eod
-push @stdin, $fh;
-push @stdout, select ();
-$argstk[scalar @stdin] = [@_];
+push @frame, {
+	args => [@_],
+	parm => {},
+	stdin => $fh,
+	stdout => select (),
+	};
 $fh = $hdl;
 }
 
@@ -1806,7 +1994,7 @@ $fh = $hdl;
 #	which means to display all data fetched..
 
 BEGIN {
-$cmdlgl{st} = [qw{verbose}];
+$cmdlgl{st} = [qw{end=s start=s verbose}];
 }
 
 sub st {
@@ -1814,9 +2002,41 @@ my $st = _get_spacetrack ();
 my $func = lc shift or die <<eod;
 Error - No Astro::SpaceTrack method specified.
 eod
+$func = 'get' if $func eq 'show';	# Special-case 'show' into 'get'.
+
+#	$st->get() is special-cased to: allow multiple arguments, allow
+#	no argument to get all defined, and format output as st set.
+
+if ($func eq 'get') {
+    @_ = _get_spacetrack_attrib_names () unless @_;
+    foreach my $name (@_) {
+	my $rslt = $st->get ($name);
+	die $rslt->status_line unless $rslt->is_success;
+	print "st set $name ", _quoter ($rslt->content), "\n";
+	}
+    return;
+    }
+
+#	$st->localize does not exist, but we special-case it to
+#	$st->get all the arguments and save them in the stack frame.
+
+  elsif ($func eq 'localize') {
+    foreach my $key (@_) {
+	$frame[$#frame]{local_st}{$key} = $st->get ($key)->content
+	    unless exists $frame[$#frame]{local_st}{$key};
+	}
+    return;
+    }
+
+#	Otherwise we just execute the function and dispatch on the
+#	result.
+
 $func !~ m/^_/ && $st->can ($func) or die <<eod;
 Error - Unknown Astro::SpaceTrack method $func.
 eod
+unshift @_, -start => _parse_time ($cmdopt{start}) if $cmdopt{start};
+unshift @_, -end =>  _parse_time ($cmdopt{end}) if $cmdopt{end};
+
 my $rslt = $st->$func (@_);
 my $content = $st->content_type || '';
 if (!$rslt->is_success) {
@@ -1863,6 +2083,18 @@ eod
     }
 }
 
+
+########################################################################
+#
+#	store () - Save the observing list using Storable nstore().
+#
+
+sub store {
+my $fn = shift or die <<eod;
+Error - No file name specified.
+eod
+Storable::nstore (\@bodies, _tilde_expand ($fn));
+}
 
 ########################################################################
 #
@@ -1977,9 +2209,10 @@ sort @rslt;
 sub _format_local_azel {
 @_ or return ' elev  azim   ';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
-    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
-Programming error - _format_azel () must be called with either zero
-    or two arguments. If two, both must be Astro::Coord::ECI objects.
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or confess <<eod;
+Programming error - _format_local_azel () must be called with either
+    zero or two arguments. If two, both must be Astro::Coord::ECI
+    objects.
 eod
 my ($az, $el, $rng) = $_[0]->azel ($_[1]);
 sprintf "%5.1f %5.1f %-2s",
@@ -1997,9 +2230,10 @@ sprintf "%5.1f %5.1f %-2s",
 sub _format_local_azel_rng {
 @_ or return ' elev  azim     range    ';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
-    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
-Programming error - _format_azel () must be called with either zero
-    or two arguments. If two, both must be Astro::Coord::ECI objects.
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or confess <<eod;
+Programming error - _format_local_azel_rng () must be called with
+    either zero or two arguments. If two, both must be
+    Astro::Coord::ECI objects.
 eod
 my ($az, $el, $rng) = $_[0]->azel ($_[1]);
 sprintf "%5.1f %5.1f %-2s @{[$rng > 1e6 ? '%10.3e' : '%10.1f']}",
@@ -2017,9 +2251,10 @@ sprintf "%5.1f %5.1f %-2s @{[$rng > 1e6 ? '%10.3e' : '%10.1f']}",
 sub _format_local_equatorial {
 @_ or return 'right asc decl';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
-    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
-Programming error - _format_azel () must be called with either zero
-    or two arguments. If two, both must be Astro::Coord::ECI objects.
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or confess <<eod;
+Programming error - _format_local_equatorial () must be called with
+    either zero or two arguments. If two, both must be
+    Astro::Coord::ECI objects.
 eod
 my ($ra, $dec, $rng) = $_[0]->equatorial ($_[1]);
 sprintf "%s %5.1f",
@@ -2035,9 +2270,10 @@ sprintf "%s %5.1f",
 sub _format_local_equatorial_rng {
 @_ or return 'right asc decl  range    ';
 @_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
-    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
-Programming error - _format_azel () must be called with either zero
-    or two arguments. If two, both must be Astro::Coord::ECI objects.
+    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or confess <<eod;
+Programming error - _format_local_equatorial_rng () must be called with
+    either zero or two arguments. If two, both must be
+    Astro::Coord::ECI objects.
 eod
 my ($ra, $dec, $rng) = $_[0]->equatorial ($_[1]);
 sprintf "%s %5.1f @{[$rng > 1e6 ? '%10.3e' : '%10.1f']}",
@@ -2062,6 +2298,20 @@ Location: Latitude %.4f, longitude %.4f, height %.0f m
 eod
 }
 
+#	$input_handle = _frame_pop ();
+
+#	Pops a stack frame. Returns the desired input handle, or
+#	undef if there are no frames left on the stack.
+
+sub _frame_pop {
+my $info = pop @frame;
+select ($info->{stdout});
+set (%{$info->{local_parm}});
+_get_spacetrack ()->set (%{$info->{local_st}})
+    if exists $info->{local_st};
+@frame ? $info->{stdin} : undef;
+}
+
 
 #	$st = _get_spacetrack ($conditional)
 
@@ -2081,6 +2331,30 @@ $st ||=
     Astro::SpaceTrack->new (webcmd => $parm{webcmd}, filter => 1);
 }
 }	# End local symbol block.
+
+#	@names = _get_spacetrack_attrib_names ();
+
+#	Get the names of all the Spacetrack attributes.
+
+{	# local symbol block.
+my @names;
+
+sub _get_spacetrack_attrib_names {
+unless (@names) {
+    my $st = _get_spacetrack ();
+    if ($st->can ('attribute_names')) {
+	@names = $st->attribute_names ();
+	}
+      else {
+	eval {$st->get ('##')};
+	(my $data = $@) =~ s/.*?Legal attributes are\s+//;
+	$data =~ s/\..*//s;
+	@names = split ',\s*', $data;
+	}
+    }
+@names;
+}
+}	# end local symbol block;
 
 #	$suf = _get_suffix ($prefix, $backoff);
 
@@ -2228,7 +2502,7 @@ $string * $units{$units};
 BEGIN {	# Begin local symbol block.
 my $last_time_set = time ();
 sub _parse_time {
-my $time = shift or return ($last_time_set = time ());
+my $time = $_[0] or return ($last_time_set = time ());
 my $rslt;
 if ($time =~ m/^([\+\-])\s*(\d+)(?:\s+(\d+)(?::(\d+)(?::(\d+))?)?)?/) {
     my $delta = ((($2 || 0) * 24 + ($3 || 0)) * 60 + ($4 || 0)) * 60 + ($5 || 0);
@@ -2251,6 +2525,8 @@ eod
 
 sub _quoter {
 my $string = shift;
+return $string if looks_like_number ($string);
+return "''" unless $string;
 return $string unless $string =~ m/[\s'"]/;
 $string =~ s/([\\'])/\\$1/g;
 return "'$string'";
@@ -2331,7 +2607,7 @@ wantarray ? @temp : join ' ', @temp;
 #	The action argument is the separater for building the
 #	SOAPAction header. It defaults to '' (suitable for .NET's
 #	delicate digestion). If you want to restore SOAP::Lite's
-#	original behaviour, specify '#'. Any other values are
+#	original behavior, specify '#'. Any other values are
 #	_NOT_ supported, and may result in a visit from unsympathetic
 #	men in snap-brim hats, dark glasses, and bad suits.
 
@@ -2374,27 +2650,28 @@ $dflt = '' unless defined $dflt;
 my $ctrl = $dflt =~ s/^(\W)// ? $1 : '-';
 my $val = $name !~ m/\D/ ? $args->[$name - 1] :
     exists $mutator{$name} ? $parm{$name} : $ENV{$name};
+my $rslt;
 if ($ctrl eq '+') {
-    return defined $val ? $dflt : '';
+    $rslt = defined $val ? $dflt : '';
     }
   elsif ($val || looks_like_number $val) {
-    return $val;
+    $rslt = $val;
     }
   elsif ($ctrl eq '-') {
-    return $dflt;
+    $rslt = $dflt;
     }
   elsif ($ctrl eq '=') {
     if ($name !~ m/\D/) {
 	$args->[$name - 1] = $dflt;
-	return $dflt;
+	$rslt = $dflt;
 	}
       elsif (exists $mutator{$name}) {
 	set ($name, $dflt);
-	return $parm{$name};
+	$rslt = $parm{$name};
 	}
       else {
 	$ENV{$name} = $dflt;
-	return $dflt;
+	$rslt = $dflt;
 	}
     }
   elsif ($ctrl eq '?') {
@@ -2403,6 +2680,17 @@ if ($ctrl eq '+') {
   else {
     die "Unrecognized substitution control character '$ctrl'\n";
     }
+$rslt;
+}
+
+#	$expand = _tilde_expand ($filename)
+
+#	Perform tilde expansion on the given filename if needed.
+
+sub _tilde_expand {
+(my $rslt = $_[0] || '') =~ s%^~%
+	$^O eq 'VMS' ? '/sys$login' : $ENV{HOME} || $ENV{LOGDIR}%e;
+$rslt
 }
 
 
@@ -2411,6 +2699,7 @@ if ($ctrl eq '+') {
 package IO::Clipboard;
 
 use Carp;
+use Config;
 use Scalar::Util qw{weaken};
 use Symbol;
 
@@ -2483,37 +2772,11 @@ Error - Clipboard unavailable. Can not find xclip. For xclip,
         see http://freshmeat.net/projects/xclip
 eod
 
-=begin comment
-
-$clipout = $^O eq 'MSWin32' ?
-    do {
-	eval "use Win32::Clipboard";
-	$@ ? ($memio = sub {croak "$err Win32::Clipboard not available"}) :
-	    sub {(my $s = $_[0]) =~ s/\n/\r\n/g;
-		Win32::Clipboard->new ()->Set ($s)}
-	} : $^O eq 'darwin' ?
-    sub {my $hdl;
-	my $pid = open ($hdl, '|pbcopy') or die <<eod;
-Error - Unable to open pipe to pbcopy.
-        $!
-eod
-	print $hdl $_[0]
-	} :
-    do {
-	eval "use Clipboard";
-	$@ ? ($memio = sub {croak "$err Clipboard not available"}) :
-	    sub {Clipboard->copy ($_[0])}
-	};
-
-=end comment
-
-=cut
-
 =for comment For parenthesis-matching editor: [
 
 =cut
 
-$memio ||= $] >= 5.008 ?
+$memio ||= $] >= 5.008 && $Config{useperlio} ?
     sub {my $fh = gensym; open ($fh, $_[0], $_[1]); $fh} :
     do {
 	eval "use IO::String";
@@ -2521,13 +2784,15 @@ $memio ||= $] >= 5.008 ?
         $@ ? sub {croak "$err IO::String not available"} :
 	    sub {new IO::String ($_[1])};
 	};
+
+*_memio = \&$memio;
 }
 
 sub new {
 return $clip if $clip;
 my $class = shift;
 my $data = '';
-my $clip = $memio->('>', \$data);
+my $clip = _memio ('>', \$data);
 *$clip->{__PACKAGE__}{data} = \$data;
 bless $clip, $class;
 my $self = $clip;
@@ -2540,6 +2805,75 @@ my $self = shift;
 my $data = *$self->{__PACKAGE__}{data};
 $clipout->($$data);
 }
+
+########################################################################
+
+#	Test hook.
+
+package Astro::satpass::Test;
+
+use Carp;
+use Config;
+
+our @ISA;
+
+=for comment For parenthesis-matching editor: [
+
+=cut
+
+our $noios;
+
+unless ($] >= 5.008 && $Config{useperlio}) {
+    eval "use IO::String";
+    if ($@) {
+	$noios = $@;
+	}
+    else {
+	push @ISA, 'IO::String';
+	}
+    }
+
+
+our $Hook;	# Code reference that we use to get data from.
+our $Handle;	# First argument to pass to hook when called.
+our $Exception;
+
+sub new {
+my $class = shift;
+confess <<eod if $noios;
+Programming error - You are trying to use the test hook under
+        a version of Perl prior to v5.8 and you do not have
+	the IO::String package available.
+eod
+confess <<eod unless ref $Hook eq 'CODE';
+Programming error - Should not instantiate a @{[__PACKAGE__]} object
+        unless \$@{[__PACKAGE__]}::Hook has been set to a code
+	reference.
+eod
+my $data = '';
+my $hook = IO::Clipboard::_memio ('+<', \$data);
+*$hook->{__PACKAGE__} = {
+	data => \$data,
+	loc => 0,
+	last_line => undef,
+	};
+bless $hook, $class;
+$hook;
+}
+
+sub getline {
+my $self = shift;
+my $attr = *$self->{__PACKAGE__};
+my $oldout = select (*STDOUT);
+$attr->{last_line} =
+    $Hook->($Handle, $attr->{last_line},
+	substr (${$attr->{data}}, $attr->{loc}), $Exception);
+$Exception = undef;
+select ($oldout);
+$attr->{loc} = length ${$attr->{data}};
+$attr->{last_line};
+}
+
 
 ########################################################################
 
@@ -2787,7 +3121,7 @@ will be discussed more below.
 
 -debug is accepted but not supported - that is, the author makes
 no claims of what will happen if you assert it, and reserves the
-right to change this behaviour without warning. It is really a
+right to change this behavior without warning. It is really a
 development aid.
 
 -time causes the elapsed time of the command in seconds to be
@@ -2816,7 +3150,7 @@ back to it, both sets of clipboard data are considered to be the
 same data stream, and both end up on the clipboard, without the
 intervening data.
 
-The command loop also supports rudamentary interpolation of arguments
+The command loop also supports rudimentary interpolation of arguments
 and other values into commands. The "magic" character is a dollar sign,
 which may be followed by the name of what is to be substituted. A
 number represents the corresponding macro or source argument (numbered
@@ -2927,7 +3261,7 @@ affect the directory in which you find yourself after exiting satpass.
 
 This command retains only the objects named on the command in the
 observing list, eliminating all others. It is intended for reducing
-a downloaded catalog to managable size. Either names, NORAD ID numbers,
+a downloaded catalog to manageable size. Either names, NORAD ID numbers,
 or a mixture may be given. Numeric items are matched against the NORAD
 IDs of the items in the observing list; non-numeric items are made into
 case-insensitive regular expressions and matched against the names of
@@ -2947,6 +3281,17 @@ For example:
 
 This command clears the observing list. It is not an error to issue it
 with the list already clear.
+
+=for html <a name="drop"></a>
+
+=item drop name_or_id ...
+
+This command removes the objects named in the command from the
+observing list, retaining all others. Either names, NORAD ID numbers,
+or a mixture may be given. Numeric items are matched against the NORAD
+IDs of the items in the observing list; non-numeric items are made into
+case-insensitive regular expressions and matched against the names of
+the items if any.
 
 =for html <a name="exit"></a>
 
@@ -2985,6 +3330,13 @@ geocode_* commands, which may also be invoked explicitly. In fact,
 it is the existence of such a command that makes a given country
 code work.
 
+If a single location is found, the latitude and longitude parameters
+will be set. The location parameter will also be set if it was not
+defaulted. In addition, if the L<autoheight|/autoheight> parameter is
+asserted the L<height|/height> command will be issued with the latitude
+and longitude defaulted, and the effective country code used for the
+geocode lookup.
+
 Yes, it would be nice to simply parse the country code off the end
 of the location, but unfortunately there are many conflicts between
 the ISO 3166 country codes and the U.S. Postal Service state codes
@@ -2992,11 +3344,24 @@ and Canadian province codes, ranging from AL (either Albania or
 Alabama) through PE (either Peru or Prince Edward Island) to VA
 (either Vatican City or Virginia).
 
+In addition to the global options, the following additional options
+are available:
+
+-height causes the command to behave as though the
+L<autoheight|/autoheight> parameter were complemented. That is, it
+causes the height command to be issued if autoheight is false, and
+vice versa.
+
+Also, any options legal for the height command are legal, and will be
+passed through to it.
+
+The above options are also available on all of the 'geocode_*' commands.
+
 =for html <a name="geocode_as"></a>
 
 =item geocode_as location
 
-Amercan Samoa is handled by L<geocode_us|/geocode_us>.
+American Samoa is handled by L<geocode_us|/geocode_us>.
 
 =for html <a name="geocode_ca"></a>
 
@@ -3014,9 +3379,6 @@ command.
 
 Because of restrictions on the use of the Geocoder.ca site, you may not
 use this command for commercial purposes.
-
-I currently have no source for height information in Canada. Attempts
-to acquire it will result in a warning.
 
 =for html <a name="geocode_fm"></a>
 
@@ -3091,7 +3453,7 @@ be buggy and not to cover rural areas well.
 
 =for html <a name="geocode_vi"></a>
 
-=item geocode_as location
+=item geocode_vi location
 
 The U.S. Virgin Islands are handled by L<geocode_us|/geocode_us>.
 
@@ -3116,6 +3478,23 @@ The latitude and longitude can be omitted, in which case the current
 L<latitude|/latitude> and L<longitude|/longitude> parameters are
 used.
 
+In addition to the global options, the following options are available
+for this command:
+
+-all causes all results to be fetched, rather than just the 'best' one.
+This probably makes no difference in the value you get, since the
+results are assumed to be in descending order of goodness, and we
+return the first one.
+
+-retry_on_zero specifies the number of times to retry the query if the
+result is zero. The default is 0, but you can specify more.
+
+-source_layer specifies the data set to retrieve the height from. The
+default is '-1', which specifies the 'best' dataset. This is ignored
+unless -all is asserted, and you can probably ignore it too.
+
+These options are also available on all of the 'height_*' commands.
+
 =for html <a name="height_af"></a>
 
 =item height_af latitude longitude
@@ -3134,8 +3513,11 @@ American Samoa is handled by L<height_us|/height_us>.
 
 =item height_ca latitude longitude
 
-Canada is handled by L<height_us|/height_us>, since the U.S. Geological
-Survey dataset includes all of North America.
+This command is equivalent to L<height_us|/height_us> and in fact is
+handled by it since the U.S. Geological Survey dataset includes all of
+North America. But in order to cover some observed weirdness in the
+data returned, -source_layer is defaulted to 'SRTM.C_1TO19_3' and
+-retry_on_zero is defaulted to 3.
 
 =for html <a name="height_fm"></a>
 
@@ -3242,6 +3624,17 @@ the observing list is empty, you get a message to that effect.
 This command loads the contents of one or more files into the
 observing list. The files must contain NORAD two- or three- line
 element sets.
+
+=for html <a name="localize"></a>
+
+=item localize parameter_name ...
+
+This command localizes the values of the given parameters. If done in a
+macro or source file, this causes the old parameter values to be
+restored when the macro or source file exits.
+
+If you localize a parameter more than once in a given macro or source
+file, the duplicate localizations are ignored.
 
 =for html <a name="macro"></a>
 
@@ -3355,6 +3748,14 @@ See the L</SPECIFYING TIMES> topic below for how to specify times.
 The defaults are 'today noon' and '+30' (meaning 30 days after the
 most-recently-specified explicit time).
 
+=for html <a name="retrieve"></a>
+
+=item retrieve filename
+
+This command is one half of the interface to the Storable module.
+It uses the retrieve() subroutine to read the observing list from
+the given file.
+
 =for html <a name="set"></a>
 
 =item set name value ...
@@ -3462,6 +3863,9 @@ file name.
 
 The file name must be quoted if it contains whitespace.
 
+The one legal option is -optional, which means that no error is reported
+if the file cannot be opened.
+
 =for html <a name="st"></a>
 
 =item st ...
@@ -3472,18 +3876,38 @@ It can also retrieve them from the Celestrak web site for as long as
 Dr. Kelso retains his authorization to redistribute the orbital
 elements.
 
-What comes after the 'st' is a legal command to the
-B<Astro::SpaceTrack> package. If a command returns orbital elements,
+What comes after the 'st' is the name of an B<Astro::SpaceTrack>
+method. If the method returns orbital elements,
 those elements will be added to the observing list. You can use
 'st help' to get brief help, or see L<Astro::SpaceTrack>.
 
-In addition to the usual qualifiers, you can specify -verbose to cause
-the content of the response to be displayed in cases where it
-normally would not be (e.g. cases where the content is "OK", or where
-it  would normally simply be digested by this application (e.g. orbital
-elements)).
+In addition to the legal B<Astro::SpaceTrack> methods, 'show' has been
+made a synonym to 'get', for consistency. Also, as of satpass 0.006_13,
+multiple attributes may be shown, 'show' or 'get' without an argument
+shows all B<Astro::SpaceTrack> arguments, and the output is formatted
+as 'st set' commands.
 
-You must install B<Astro::SpaceTrack> version 0.011 or higher to use
+You can also use the 'st localize' command to localize
+B<Astro::SpaceTrack> attribute values in exactly the same way that the
+L<localize|/localize> command localizes satpass parameters.
+
+In addition to the usual options, the following options specific to
+this command are supported:
+
+-start and -end specify the start and end of the date range to be
+retrieved. The date may be specified in any legal format. See
+L<SPECIFYING TIMES|/SPECIFYING TIMES> for the details. If you
+specify relative times, be aware that the -start value is parsed
+before the -end value, regardless of their positions on the command
+line. Yes, Astro::SpaceTrack already supports this, but by pre-parsing
+them we get more flexibility on how to specify the date and time.
+
+-verbose causes the content of the response to be displayed in cases
+where it normally would not be (e.g. cases where the content is "OK",
+or where it  would normally simply be digested by this application
+(e.g. orbital elements)).
+
+You must install B<Astro::SpaceTrack> version 0.017 or higher to use
 this command.
 
 Example of retrieving data on the International Space Station and the
@@ -3496,7 +3920,7 @@ Hubble Space Telescope from Space Track:
  satpass> # Get the data by NORAD ID number
  satpass> st retrieve 20580 25544
 
-Exampe of retrieving the data from Celestrak without using a Space
+Example of retrieving the data from Celestrak without using a Space
 Track login:
 
  satpass> # Specify direct retrieval.
@@ -3513,11 +3937,26 @@ Track login:
 This command displays the operational status of satellites, fetching
 it if necessary. You can specify one or more satellite types if
 desired, but there is not much point since the only legal type at
-the moment is 'iridium'.
+the moment is 'iridium', and the specification of the type is
+deprecated anyway (see note below).
 
 Normally, this command will not reload status if it is already
 available, since it does not change that often. But you can force
 a reload using the -reload qualifier.
+
+B<Note:> If Iridium flare functionality is ever released, subcommands
+to manipulate the status list will be added, and the format of the
+output of the unqualified command will change to the commands
+necessary to rebuild the list. This is the reason the 'status iridium'
+command is deprecated.
+
+=for html <a name="store"></a>
+
+=item store filename
+
+This command is one half of the interface to the Storable module.
+It uses the nstore() subroutine to write the observing list to
+the given file.
 
 =for html <a name="system"></a>
 
@@ -3558,7 +3997,7 @@ This command displays the original two- or three- line element data
 which was used to build the observation list.
 
 The -verbose qualifier causes the data to be displayed verbosely,
-one item per line, labelled and with units if applicable.
+one item per line, labeled and with units if applicable.
 
 =back
 
@@ -3631,7 +4070,7 @@ States of America) do anything useful.
 See L<http://www.iso.org/iso/en/prods-services/iso3166ma/index.html>
 for the current list of country codes. Note that these are B<not>
 always the same as the corresponding top-level geographic domain names
-(e.g. Great Britiain is 'GB' in ISO 3166 but has 'uk' as the top-level
+(e.g. Great Britain is 'GB' in ISO 3166 but has 'uk' as the top-level
 geographic domain name).
 
 The country codes are case-insensitive, since they will be converted to
@@ -3662,7 +4101,7 @@ The default is '%a %d-%b-%Y', which produces (e.g.)
 This parameter turns on debugging output. The only supported value
 is 0, which is the default. The author makes no representation of
 what will happen if a non-zero value is set, not does he promise
-that the behaviour for a given non-zero value will not change from
+that the behavior for a given non-zero value will not change from
 release to release.
 
 The default is 0.
@@ -3860,7 +4299,7 @@ The problem this attempts to fix is that, in jurisdictions that do
 summer time, Date::Manip appears (to me, at least) to give the wrong
 time if the current time is not summer time but the time converted is.
 That is to say, with a time zone of EST5EDT, in January, 'jan 1 noon'
-converts to 5:00 PM GMT. But 'jul 1 noon'does also, and it seems to
+converts to 5:00 PM GMT. But 'jul 1 noon' does also, and it seems to
 me that this should give 4:00 PM GMT.
 
 If you turn this setting on, 'jul 1 noon' comes out 4:00 PM GMT even
@@ -3868,7 +4307,7 @@ if done in January. If you plan to parse times B<with zones> (e.g.
 'jul 1 noon edt'), you should turn this setting off.
 
 I confess to considering this a wart. If I figure out how to get
-behaviour I consider more straightforward out of Date::Manip, I will
+behavior I consider more straightforward out of Date::Manip, I will
 no-op this attribute and deprecate its use.
 
 The default is 0 (i.e. false).
@@ -4093,8 +4532,8 @@ available.
 
 =item -filter
 
-which supresses extraneous output to make satpass behave more like a
-Unix filter. The only thing supressed at the moment is the banner text.
+which suppresses extraneous output to make satpass behave more like a
+Unix filter. The only thing suppressed at the moment is the banner text.
 
 =back
 

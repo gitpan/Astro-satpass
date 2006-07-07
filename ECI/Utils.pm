@@ -41,7 +41,7 @@ use warnings;
 
 package Astro::Coord::ECI::Utils;
 
-our $VERSION = "0.004";
+our $VERSION = "0.005";
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -154,8 +154,10 @@ to square the result again.
 
 sub distsq {
 ref $_[0] eq 'ARRAY' && ref $_[1] eq 'ARRAY' && @{$_[0]} == @{$_[1]} or
-    die "Programming error - Both arguments to distsq must be ",
-    "references to lists of the same length.";
+    confess <<eod;
+Programming error - Both arguments to distsq must be  references to
+        lists of the same length.
+eod
 
 my $sum = 0;
 my $size = @{$_[0]};
@@ -286,7 +288,7 @@ jday2000($_[0]) + 2_451_545.0	#   Meeus p. 62
 
 =item $theta = mod2pi ($theta)
 
-This subrouting reduces the given angle in radians to the range 0 <=
+This subroutine reduces the given angle in radians to the range 0 <=
 $theta < TWOPI.
 
 =cut
@@ -491,7 +493,7 @@ __END__
 
 =back
 
-=head1 ACKNOWLEDGEMENTS
+=head1 ACKNOWLEDGMENTS
 
 The author wishes to acknowledge Jean Meeus, whose book "Astronomical
 Algorithms" (second edition) published by Willmann-Bell Inc

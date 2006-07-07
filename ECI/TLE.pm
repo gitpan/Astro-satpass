@@ -75,7 +75,7 @@ a given time, you do
 
   my ($lat, $long, $alt) = $body->model ($time)->geodetic;
 
-Or, assuming the L<model|/item_model> attribue is set the way you want
+Or, assuming the L<model|/item_model> attribute is set the way you want
 it, by
 
   my ($lat, $long, $alt) = $body->geodetic ($time);
@@ -102,7 +102,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = 0.003;
+our $VERSION = '0.004';
 
 use base qw{Astro::Coord::ECI};
 
@@ -163,8 +163,16 @@ use constant SGP_RHO => .15696615;
 
 #	Legal model names.
 
-my %legal_model = map {$_ => 1} qw{model model4 model8 sdp4 sdp8 sgp sgp4 sgp8};
-
+no warnings qw{once};
+*_model_model = \&model;
+*_model_model4 = \&model4;
+*_model_model8 = \&model8;
+*_model_sdp4 = \&sdp4;
+*_model_sdp8 = \&sdp8;
+*_model_sgp = \&sgp;
+*_model_sgp4 = \&sgp4;
+*_model_sgp8 = \&sgp8;
+use warnings qw{once};
 
 #	List all the legitimate attributes for the purposes of the
 #	get and set methods. Possible values of the hash are:
@@ -194,7 +202,7 @@ my %attrib = (
     elementnumber => 0,
     inclination => 1,
     model => sub {
-	$_[2] and $legal_model{$_[2]} || croak <<eod;
+	$_[2] and $_[0]->can ("_model_$_[2]") || croak <<eod;
 Error - Illegal model name '$_[2]'.
 eod
 	$_[0]->{$_[1]} = $_[2];
@@ -212,6 +220,8 @@ eod
 my %static = (
     model => 'model',
     );
+
+use constant TLE_INIT => '_init';
 
 =item $tle = Astro::Coord::ECI::TLE->new()
 
@@ -302,8 +312,8 @@ its period is at least 225 minutes (= 13500 seconds).
 =cut
 
 sub is_deep {
-return $_[0]{_isdeep} if exists $_[0]{_isdeep};
-return ($_[0]{_isdeep} = $_[0]->period () >= 13500);
+return $_[0]->{&TLE_INIT}{TLE_isdeep} if exists $_[0]->{&TLE_INIT}{TLE_isdeep};
+return ($_[0]->{&TLE_INIT}{TLE_isdeep} = $_[0]->period () >= 13500);
 }
 
 
@@ -456,10 +466,12 @@ return @rslt;
 
 This method returns the orbital period of the object in seconds.
 
+=for comment help parenthesis-matching editor }
+
 =cut
 
 sub period {
-return $_[0]{_period} if exists $_[0]{_period};
+return $_[0]->{&TLE_INIT}{TLE_period} if exists $_[0]->{&TLE_INIT}{TLE_period};
 my $self = shift;
 
 my $a1 = (SGP_XKE / $self->{meanmotion}) ** SGP_TOTHRD;
@@ -470,7 +482,7 @@ my $a0 = $a1 * (1 - $del1 * (.5 * SGP_TOTHRD +
 	$del1 * (1 + 134/81 * $del1)));
 my $del0 = $temp / ($a0 * $a0);
 my $xnodp = $self->{meanmotion} / (1 + $del0);
-return ($self->{_period} = SGP_TWOPI / $xnodp * SGP_XSCPMN);
+return ($self->{&TLE_INIT}{TLE_period} = SGP_TWOPI / $xnodp * SGP_XSCPMN);
 }
 
 
@@ -478,7 +490,7 @@ return ($self->{_period} = SGP_TWOPI / $xnodp * SGP_XSCPMN);
 
 This method sets the values of the various attributes. The changing of
 attributes actually used by the orbital models will cause the models to
-be reinitialized. This happens transparantly, and is no big deal. For
+be reinitialized. This happens transparently, and is no big deal. For
 a description of the attributes, see L</ATTRIBUTES>.
 
 Because this is a subclass of Astro::Coord::ECI, any attributes of that
@@ -511,11 +523,7 @@ while (@_) {
 	$clear ||= $attrib{$name};
 	}
     }
-$clear and do {
-    foreach (qw{_sgp _sgp4 _sdp4 _sgp8 _sdp8 _deep _isdeep}) {
-	delete $self->{$_};
-	}
-    };
+$clear and delete $self->{&TLE_INIT};
 }
 
 
@@ -549,7 +557,7 @@ my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 #>>>	retrieve the results of initialization, performing the
 #>>>	calculations if needed. -- TRW
 
-my $parm = $self->{_sgp} ||= do {
+my $parm = $self->{&TLE_INIT}{TLE_sgp} ||= do {
     $self->is_deep and croak <<EOD;
 Error - The SGP model is not valid for deep space objects.
         Use the SDP4 or SDP8 models instead.
@@ -765,7 +773,7 @@ my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 #>>>	retrieve the results of initialization, performing the
 #>>>	calculations if needed. -- TRW
 
-my $parm = $self->{_sgp4} ||= do {
+my $parm = $self->{&TLE_INIT}{TLE_sgp4} ||= do {
     $self->is_deep and croak <<EOD;
 Error - The SGP4 model is not valid for deep space objects.
         Use the SDP4 or SDP8 models instead.
@@ -961,6 +969,22 @@ $parm->{isimp} or do {
 my $a = $parm->{aodp} * $tempa ** 2;
 my $e = $self->{eccentricity} - $tempe;
 my $xl = $xmp + $omega + $xnode + $parm->{xnodp} * $templ;
+die <<eod if $e > 1 || $e < -1;
+Error - Effective eccentricity > 1
+    ID = @{[$self->get ('id')]}
+    Epoch = @{[scalar gmtime $self->get ('epoch')]} GMT
+    \$self->{bstardrag} = $self->{bstardrag}
+    \$parm->{c4} = $parm->{c4}
+    \$tsince = $tsince
+    \$tempe = \$self->{bstardrag} * \$parm->{c4} * \$tsince
+    \$tempe = $tempe
+    \$self->{eccentricity} = $self->{eccentricity}
+    \$e = \$self->{eccentricity} - \$tempe
+    \$e = $e
+    Either this object represents a bad set of elements, or you are
+    using it beyond its "best by" date ("expiry date" in some dialects
+    of English).
+eod
 my $beta = sqrt(1 - $e * $e);
 $self->{debug} and print <<eod;
 Debug SGP4 - Before xn,
@@ -1093,7 +1117,7 @@ my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 #>>>	retrieve the results of initialization, performing the
 #>>>	calculations if needed. -- TRW
 
-my $parm = $self->{_sdp4} ||= do {
+my $parm = $self->{&TLE_INIT}{TLE_sdp4} ||= do {
     $self->is_deep or croak <<EOD;
 Error - The SGP4 model is not valid for near-earth objects.
         Use the SGP, SGP4, or SGP8 models instead.
@@ -1174,7 +1198,7 @@ EOD
     my $xlcof = .125 * $a3ovk2 * $sini0 * (3 + 5 * $cosi0) / (1 + $cosi0);
     my $aycof = .25 * $a3ovk2 * $sini0;
     my $x7thm1 = 7 * $theta2 - 1;
-    $self->{_deep} = {$self->_dpinit ($eosq, $sini0, $cosi0, $beta0,
+    $self->{&TLE_INIT}{TLE_deep} = {$self->_dpinit ($eosq, $sini0, $cosi0, $beta0,
 	$aodp, $theta2, $sing, $cosg, $beta02, $xmdot, $omgdot,
 	$xnodot, $xnodp)},
 
@@ -1232,7 +1256,7 @@ eod
 	xnodp => $xnodp,
 	};
     };
-my $dpsp = $self->{_deep};
+my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 
 
 #* UPDATE FOR SECULAR GRAVITY AND ATMOSPHERIC DRAG
@@ -1376,7 +1400,7 @@ my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 #>>>	retrieve the results of initialization, performing the
 #>>>	calculations if needed. -- TRW
 
-my $parm = $self->{_sgp8} ||= do {
+my $parm = $self->{&TLE_INIT}{TLE_sgp8} ||= do {
     $self->is_deep and croak <<EOD;
 Error - The SGP8 model is not valid for deep space objects.
         Use the SDP4 or SDP8 models instead.
@@ -1768,7 +1792,7 @@ my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 #>>>	retrieve the results of initialization, performing the
 #>>>	calculations if needed. -- TRW
 
-my $parm = $self->{_sdp8} ||= do {
+my $parm = $self->{&TLE_INIT}{TLE_sdp8} ||= do {
     $self->is_deep or croak <<EOD;
 Error - The SDP8 model is not valid for near-earth objects.
         Use the SGP, SGP4 or SGP8 models instead.
@@ -1843,7 +1867,7 @@ EOD
 	$c4 * $cos2g + $c5 * $sing);
     my $xndtn = $xndt / $xnodp;
     my $edot = - SGP_TOTHRD * $xndtn * (1 - $self->{eccentricity});
-    $self->{_deep} = {$self->_dpinit ($eosq, $sini, $cosi, $beta0,
+    $self->{&TLE_INIT}{TLE_deep} = {$self->_dpinit ($eosq, $sini, $cosi, $beta0,
 	$aodp, $theta2, $sing, $cosg, $beta02, $xlldot, $omgdt,
 	$xnodot, $xnodp)},
     {
@@ -1874,7 +1898,7 @@ EOD
 	xnodp => $xnodp,
 	};
     };
-my $dpsp = $self->{_deep};
+my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 
 
 #*	UPDATE FOR SECULAR GRAVITY AND ATMOSPHERIC DRAG
@@ -2551,7 +2575,7 @@ return (
 
 sub _dpsec {
 my $self = shift;
-my $dpsp = $self->{_deep};
+my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 my ($xll, $omgasm, $xnodes, $em, $xinc, $xn, $t) = @_;
 my @orig = map {defined $_ ? $_ : 'undef'}
 	map {ref $_ eq 'SCALAR' ? $$_ : $_} @_
@@ -2630,7 +2654,7 @@ eod
 
 sub _dps_dot {
 my $self = shift;
-my $dpsp = $self->{_deep};
+my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 
 
 #C
@@ -2709,7 +2733,7 @@ return ($xldot, $xndot, $xnddt);
 
 sub _dpper {
 my $self = shift;
-my $dpsp = $self->{_deep};
+my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 my ($em, $xinc, $omgasm, $xnodes, $xll, $t) = @_;
 my @orig = map {defined $_ ? $_ : 'undef'}
 	map {ref $_ eq 'SCALAR' ? $$_ : $_} @_
@@ -2860,7 +2884,7 @@ static - if the attribute may be set on the class.
 
 Note that the orbital elements provided by NORAD are tweaked for use by
 the models implemented by this class. If you plug them in to the
-same-named parameters of other models, your milage may vary
+same-named parameters of other models, your mileage may vary
 significantly.
 
 =over
@@ -2891,7 +2915,7 @@ implied decimal point inserted.
 
 =item elementnumber (numeric, parse)
 
-This attribue contains the element set number of the data set. In
+This attribute contains the element set number of the data set. In
 theory, this gets incremented every time a data set is issued.
 
 =item ephemeristype (numeric, parse)
@@ -2931,11 +2955,15 @@ first letters, and spent boosters, debris, etc getting the rest.
 
 =item meananomaly (numeric, parse)
 
-This attribute contains the mean orbital anomaly in radians.
+This attribute contains the mean orbital anomaly at the epoch, in
+radians. In slightly less technical terms, this is the angular
+distance a body in a circular orbit of the same period (that is
+what the 'mean' means) would be from perigee at the epoch, measured
+in the plane of the orbit.
 
 =item meanmotion (numeric, parse)
 
-This attribute contains mean motion of body, in radians per
+This attribute contains the mean motion of the body, in radians per
 minute.
 
 =item model (string, static)
@@ -3001,7 +3029,7 @@ implementation of these models.
 
 I am aware of no other modules that perform calculations with NORAD
 orbital element sets. The Astro-Coords package by Tim Jenness
-provides calculations using oribtal elements, but the NORAD elements
+provides calculations using orbital elements, but the NORAD elements
 are tweaked for use by the models implemented in this package.
 
 =head1 AUTHOR

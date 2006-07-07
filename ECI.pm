@@ -94,7 +94,7 @@ use warnings;
 
 package Astro::Coord::ECI;
 
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -120,8 +120,7 @@ my %static = (	# The geoid, etc. Geoid get set later.
     );
 my %savatr;	# Attribs saved across "normal" operations. Set at end.
 my @kilatr =	# Attributes to purge when setting coordinates.
-    qw{_need_purge cache eci ecliptic equatorial
-	geocentric geodetic inertial local_mean_time specified ecef}; #?
+    qw{_need_purge _ECI_cache inertial local_mean_time specified}; #?
 
 
 =item $coord = Astro::Coord::ECI->new ();
@@ -162,15 +161,21 @@ ref $B && UNIVERSAL::isa ($B, __PACKAGE__) &&
 Error - Both arguments must be @{[__PACKAGE__]} objects.
 eod
 
-my $a = distsq ([$B->ecef], [$C->ecef]);
-my $b = distsq ([$self->ecef], [$C->ecef]);
-my $c = distsq ([$self->ecef], [$B->ecef]);
+my $method = $self->{inertial} ? 'eci' : 'ecef';
+my $cA = [$self->$method ()];
+my $cB = [$B->$method ()];
+my $cC = [$C->$method ()];
+my $a = distsq ($cB, $cC);
+my $b = distsq ($cA, $cC);
+my $c = distsq ($cA, $cB);
 
 acos (($b + $c - $a) / sqrt (4 * $b * $c));
 }
 
 
 =item ($azimuth, $elevation, $range) = $coord->azel ($coord2, $upper);
+
+=for comment help syntax-highlighting editor "
 
 This method takes another coordinate object, and computes its azimuth,
 elevation, and range in reference to the object doing the computing.
@@ -182,7 +187,7 @@ If the optional 'upper' argument is true, the calculation will be of
 the upper limb of the object, using the 'diameter' attribute of the
 $coord2 object.
 
-As a side effect, the time of the $coord object is set from the
+As a side effect, the time of the $coord object may be set from the
 $coord object.
 
 If the L<refraction|/refraction> attribute of the $coord object is
@@ -192,52 +197,114 @@ the correct_for_refraction() method.
 The basic algorithm comes from T. S. Kelso's "Computers and Satellites"
 column in "Satellite Times", November/December 1995, titled "Orbital
 Coordinate Systems, Part II" and available at
-F<http://celestrak.com/columns/v02n02/>.
+F<http://celestrak.com/columns/v02n02/>. If the object represents fixed
+coordinates, the author's algorithm is used, but the author confesses
+needing to refer to Dr. Kelso's work to get the signs right.
 
-=for comment help syntax-highlighting editor '
+=for comment help syntax-highlighting editor "
 
 =cut
 
 sub azel {
 my $self = shift;
-my $cache = ($self->{cache} ||= {});
+my $cache = ($self->{_ECI_cache} ||= {});
 $self->{debug} and do {
     local $Data::Dumper::Terse = 1;
     print "Debug azel - ", Dumper ($self, @_);
     };
 my $trn2 = shift;
 my $upper = shift;
-my @obj = $trn2->eci (@_);
-my $time = $trn2->universal;
-my @base = $self->eci ($time);
-my ($phi, $lamda, $h) = $self->geodetic;
-my @delta;
+
+my ($azimuth, $range, $elevation);
+if ($self->{inertial}) {
+
+    my @obj = $trn2->eci (@_);
+    my $time = $trn2->universal;
+    my @base = $self->eci ($time);
+    my ($phi, $lambda, $h) = $self->geodetic ();
+    my @delta;
 
 
 #	Kelso algorithm from
 #	http://celestrak.com/columns/v02n02/
 
-for (my $i = 0; $i < 6; $i++) {
-    $delta[$i] = $obj[$i] - $base[$i];
-    }
-my $thetag = thetag ($time);
-my $theta = mod2pi ($thetag + $lamda);
-my $sinlat = ($cache->{sinphi} ||= sin ($phi));
-my $sintheta = sin ($theta);
-my $coslat = ($cache->{cosphi} ||= cos ($phi));
-my $costheta = cos ($theta);
-my $rterm = $costheta * $delta[0] + $sintheta * $delta[1];
-my $ts = $sinlat * $rterm - $coslat * $delta[2];
-my $te = - $sintheta * $delta[0] + $costheta * $delta[1];
-my $tz = $coslat * $rterm + $sinlat * $delta[2];
-my $azimuth = mod2pi (atan2 ($te, - $ts));
-my $range = sqrt ($delta[0] * $delta[0] + $delta[1] * $delta[1] +
+    for (my $i = 0; $i < 6; $i++) {
+	$delta[$i] = $obj[$i] - $base[$i];
+	}
+    my $thetag = thetag ($time);
+    my $theta = mod2pi ($thetag + $lambda);
+    my $sinlat = ($cache->{inertial}{sinphi} ||= sin ($phi));
+    my $sintheta = sin ($theta);
+    my $coslat = ($cache->{inertial}{cosphi} ||= cos ($phi));
+    my $costheta = cos ($theta);
+    my $rterm = $costheta * $delta[0] + $sintheta * $delta[1];
+    my $ts = $sinlat * $rterm - $coslat * $delta[2];
+    my $te = - $sintheta * $delta[0] + $costheta * $delta[1];
+    my $tz = $coslat * $rterm + $sinlat * $delta[2];
+    $azimuth = mod2pi (atan2 ($te, - $ts));
+    $range = sqrt ($delta[0] * $delta[0] + $delta[1] * $delta[1] +
 	$delta[2] * $delta[2]);
-my $elevation = asin ($tz / $range);
+    $elevation = asin ($tz / $range);
 
 
 #	End of Kelso algorithm.
 
+    }
+  else {	# !$self->{inertial}
+
+###    $self->universal ($trn2->universal ()) if $self->{inertial};
+    my ($sinphi, $cosphi, $sinlamda, $coslamda) = @{
+	$cache->{fixed}{geodetic_funcs} ||= do {
+	    my ($phi, $lambda) = $self->geodetic ();
+	    [sin ($phi), cos ($phi), sin ($lambda), cos ($lambda)]
+	    }
+	};
+
+    my @base = ($self->ecef ())[0, 1, 2];
+    my @tgt = ($trn2->ecef ())[0, 1, 2];
+    my @delta;
+    foreach my $ix (0 .. 2) {$delta[$ix] = $tgt[$ix] - $base[$ix]}
+
+#	We need to rotate the coordinate system in the X-Y plane by the
+#	longitude, followed by a rotation in the Z-X plane by 90
+#	degrees minus the latitude. In linear algebra, this is the
+#	theta matrix premultiplied by the phi matrix, which is
+#
+#	+-                           -+   +-                     -+
+#	|  cos(90-phi) 0 -sin(90-phi) |   |  sin(phi) 0 -cos(phi) |
+#	|       0      1       0      | = |      0    1     0     |
+#	|  sin(90-phi) 0  cos(90-phi) |   |  cos(phi) 0  sin(phi) |
+#	+-                           -+   +-                     -+
+#
+#	The entire rotation is therefore
+#
+#	+-                     -+   +-                        -+
+#	|  sin(phi) 0 -cos(phi) |   |  cos(lambda)  sin(lambda) 0 |
+#	|      0    1     0     | x | -sin(lambda)  cos(lambda) 0 | =
+#	|  cos(phi) 0  sin(phi) |   |       0          0      1 |
+#	+-                     -+   +-                        -+
+#
+#	+-                                                 -+
+#	|  cos(lambda)sin(phi)  sin(lambda)sin(phi) -cos(phi) |
+#	| -sin(lambda)          cos(lambda)             0     |
+#	|  cos(lambda)cos(phi)  sin(lambda)cos(phi)  sin(phi) |
+#	+-                                                 -+
+
+    my $lclx = $coslamda * $sinphi * $delta[0] + $sinlamda * $sinphi * $delta[1] - $cosphi * $delta[2];
+    my $lcly = - $sinlamda * $delta[0] + $coslamda * $delta[1];
+    my $lclz = $coslamda * $cosphi * $delta[0] + $sinlamda * $cosphi * $delta[1] + $sinphi * $delta[2];
+
+#	We end with a Cartesian coordinate system with the observer at
+#	the origin, with X pointing to the South, Y to the East, and Z
+#	to the zenith. This gets converted to azimuth and elevation
+#	using the definition of those terms. Note that X gets negated
+#	in the computation of azimuth, since azimuth is from the North.
+
+    $azimuth = mod2pi (atan2 ($lcly, -$lclx));
+    $range = sqrt ($delta[0] * $delta[0] + $delta[1] * $delta[1] + $delta[2] * $delta[2]);
+    $elevation = asin ($lclz / $range);
+
+    }
 
 #	Adjust for upper limb and refraction if needed.
 
@@ -357,8 +424,8 @@ The algorithm is simple enough to be the author's.
 
 sub dip {
 my $self = shift;
-my ($psi, $lamda, $h) = $self->geodetic;
-my ($psiprime, undef, $rho) = $self->geocentric;
+my ($psi, $lambda, $h) = $self->geodetic ();
+my ($psiprime, undef, $rho) = $self->geocentric ();
 my $angle = $h >= 0 ?
     - acos (($rho - $h) / $rho) :
     acos ($rho / ($rho - $h));
@@ -434,9 +501,9 @@ my $correction = .37 * ($year - 2100);	# Meeus' correction to (10.2)
 	+ $correction;			# Meeus' correction.
 }
 
-=for comment help syntax-highlighting editor "
-
 =item $coord = $coord->ecef($x, $y, $z, $xdot, $ydot, $zdot)
+
+=for comment help syntax-highlighting editor "
 
 This method sets the coordinates represented by the object in terms
 of L</Earth-Centered, Earth-fixed (ECEF) coordinates>, with x being
@@ -468,7 +535,10 @@ my $self = shift;
 $self = $self->_check_coord (ecef => \@_);
 
 unless (@_) {
-    return @{$self->{ecef} || croak <<eod};
+    my $cache = ($self->{_ECI_cache} ||= {});
+    return @{$cache->{fixed}{ecef}} if $cache->{fixed}{ecef};
+    return $self->_convert_eci_to_ecef () if $self->{inertial};
+    croak <<eod;
 Error - Object has not been initialized.
 eod
     }
@@ -479,7 +549,7 @@ if (@_ == 3) {
 
 if (@_ == 6) {
     foreach my $key (@kilatr) {delete $self->{$key}}
-    $self->{ecef} = [@_];
+    $self->{_ECI_cache}{fixed}{ecef} = [@_];
     $self->{specified} = 'ecef';
     $self->{inertial} = 0;
     }
@@ -544,48 +614,22 @@ sub eci {
 my $self = shift;
 
 $self = $self->_check_coord (eci => \@_);
-my $cache = ($self->{cache} ||= {});
 
 unless (@_) {
-    return @{$self->{eci}} if $self->{eci};
-    my $thetag = ($cache->{thetag} ||= thetag ($self->universal));
-    my @data = $self->ecef;
-    $self->{debug} and print <<eod;
-Debug eci - thetag = $thetag
-    (x, y) = (@data[0, 1])
+    my $cache = ($self->{_ECI_cache} ||= {});
+    return @{$cache->{inertial}{eci}} if $cache->{inertial}{eci};
+    return $self->_convert_ecef_to_eci () if $self->{specified};
+    croak <<eod;
+Error - Object has not been initialized.
 eod
-    my $costh = ($cache->{costhetag} ||= cos ($thetag));
-    my $sinth = ($cache->{sinthetag} ||= sin ($thetag));
-    @data[0, 1] = ($data[0] * $costh - $data[1] * $sinth,
-	$data[0] * $sinth + $data[1] * $costh);
-    @data[3, 4] = ($data[3] * $costh - $data[4] * $sinth,
-	$data[3] * $sinth + $data[4] * $costh);
-     $self->{debug} and print <<eod;
-Debug eci - after rotation,
-    (x, y) = (@data[0, 1])
-eod
-    $data[3] += $data[1] * $self->{angularvelocity};
-    $data[4] -= $data[0] * $self->{angularvelocity};
-    return @{$self->{eci} = [@data]};
+
     }
 
 @_ == 3 and push @_, 0, 0, 0;
 
 if (@_ == 6) {
-    my $thetag = ($cache->{thetag} ||= thetag ($self->universal));
-    my @ecef = @_;
-    $ecef[3] -= $ecef[1] * $self->{angularvelocity};
-    $ecef[4] += $ecef[0] * $self->{angularvelocity};
-##    my $costh = cos (- $thetag);
-    my $costh = ($cache->{costhetag} ||= cos ($thetag));	# cos (-theta) == cos (theta)
-##    my $sinth = sin (- $thetag);
-    my $sinth = - ($cache->{sinthetag} ||= sin ($thetag));	# sin (-theta) == - sin (theta)
-    @ecef[0, 1] = ($ecef[0] * $costh - $ecef[1] * $sinth,
-	$ecef[0] * $sinth + $ecef[1] * $costh);
-    @ecef[3, 4] = ($ecef[3] * $costh - $ecef[4] * $sinth,
-	$ecef[3] * $sinth + $ecef[4] * $costh);
-    $self->ecef (@ecef);
-    $self->{eci} = [@_];
+    foreach my $key (@kilatr) {delete $self->{$key}}
+    $self->{_ECI_cache}{inertial}{eci} = [@_];
     $self->{specified} = 'eci';
     $self->{inertial} = 1;
     }
@@ -637,7 +681,7 @@ my $self = shift;
 $self = $self->_check_coord (ecliptic => \@_);
 
 unless (@_) {
-    return @{$self->{ecliptic}} if $self->{ecliptic};
+    return @{$self->{_ECI_cache}{inertial}{ecliptic}} if $self->{_ECI_cache}{inertial}{ecliptic};
     my ($alpha, $delta, $rho) = $self->equatorial ();
 
     my $epsilon = obliquity ($self->dynamical);
@@ -647,42 +691,42 @@ unless (@_) {
     my $cosepsilon = cos ($epsilon);
     my $sinepsilon = sin ($epsilon);
 
-    my $lamda = mod2pi (atan2 ($sinalpha * $cosepsilon +	# Meeus (13.1), pg 93.
+    my $lambda = mod2pi (atan2 ($sinalpha * $cosepsilon +	# Meeus (13.1), pg 93.
 	$sindelta / $cosdelta * $sinepsilon, cos ($alpha)));
     my $beta = asin ($sindelta * $cosepsilon -		# Meeus (13.2), pg 93.
 	$cosdelta * $sinepsilon * $sinalpha);
 
-    return @{$self->{ecliptic} = [$beta, $lamda, $rho]};
+    return @{$self->{_ECI_cache}{inertial}{ecliptic} = [$beta, $lambda, $rho]};
     }
 
 if (@_ == 3) {
     ref $self or $self = $self->new ();
-    my ($beta, $lamda, $rho) = @_;
+    my ($beta, $lambda, $rho) = @_;
 
-    $lamda = mod2pi ($lamda);
+    $lambda = mod2pi ($lambda);
     my $epsilon = obliquity ($self->dynamical);
-    my $sinlamda = sin ($lamda);
+    my $sinlamda = sin ($lambda);
     my $cosepsilon = cos ($epsilon);
     my $sinepsilon = sin ($epsilon);
     my $cosbeta = cos ($beta);
     my $sinbeta = sin ($beta);
     my $alpha = mod2pi (atan2 ($sinlamda * $cosepsilon -	# Meeus (13.3), pg 93
-	$sinbeta / $cosbeta * $sinepsilon, cos ($lamda)));
+	$sinbeta / $cosbeta * $sinepsilon, cos ($lambda)));
     my $delta = asin ($sinbeta * $cosepsilon +		# Meeus (13.4), pg 93.
 	$cosbeta * $sinepsilon * $sinlamda);
     $self->{debug} and print <<eod;
 Debug ecliptic -
     beta = $beta (ecliptic latitude, radians)
          = @{[rad2deg ($beta)]} (ecliptic latitude, degrees)
-    lamda = $lamda (ecliptic longitude, radians)
-         = @{[rad2deg ($lamda)]} (ecliptic longitude, degrees)
+    lambda = $lambda (ecliptic longitude, radians)
+         = @{[rad2deg ($lambda)]} (ecliptic longitude, degrees)
     rho = $rho (range, kilometers)
     epsilon = $epsilon (obliquity of ecliptic, radians)
     alpha = $alpha (right ascension, radians)
     delta = $delta (declination, radians)
 eod
     $self->equatorial ($alpha, $delta, $rho);
-    $self->{ecliptic} = [@_];
+    $self->{_ECI_cache}{inertial}{ecliptic} = [@_];
     $self->{specified} = 'ecliptic';
     $self->{inertial} = 1;
     }
@@ -720,7 +764,7 @@ dynamical() methods).
 
 =item ($rightasc, $declin, $range) = $coord->equatorial ($coord2);
 
-This method returns the apparant equatorial coordinates of the object
+This method returns the apparent equatorial coordinates of the object
 represented by $coord2, as seen from the location represented by
 $coord.
 
@@ -752,7 +796,7 @@ unless (@_) {
     if ($body) {
 	my ($azimuth, $elevation, $range) = $self->azel ($body, 0);
 	my $time = $body->universal ();
-	my ($phi, $theta) = $self->geodetic;
+	my ($phi, $theta) = $self->geodetic ();
 	$theta = mod2pi ($theta + thetag ($time));
 	my $sin_theta = sin ($theta);
 	my $cos_theta = cos ($theta);
@@ -782,13 +826,13 @@ unless (@_) {
 	return ($right_ascension, $declination, $range);
 	}
 
-    return @{$self->{equatorial}} if $self->{equatorial};
+    return @{$self->{_ECI_cache}{inertial}{equatorial}} if $self->{_ECI_cache}{inertial}{equatorial};
     my ($x, $y, $z, $xdot, $ydot, $zdot) = $self->eci ();
     my $ra = mod2pi (atan2 ($y, $x));	# Right ascension is always positive.
     my $rsq = $x * $x + $y * $y;
     my $dec = atan2 ($z, sqrt ($rsq));
     my $range = sqrt ($rsq + $z * $z);
-    return @{$self->{equatorial} = [$ra, $dec, $range]};
+    return @{$self->{_ECI_cache}{inertial}{equatorial} = [$ra, $dec, $range]};
     }
 
 if (@_ == 3) {
@@ -802,7 +846,7 @@ eod
     my $x = $r * cos ($ra);
     my $y = $r * sin ($ra);
     $self->eci ($x, $y, $z, 0, 0, 0);
-    $self->{equatorial} = [@_];
+    $self->{_ECI_cache}{inertial}{equatorial} = [@_];
     $self->{specified} = 'equatorial';
     $self->{inertial} = 1;
     }
@@ -820,11 +864,11 @@ $self;
 
 =for comment help syntax highlighting editor "
 
-=item $coord = $coord->geocentric($psiprime, $lamda, $rho);
+=item $coord = $coord->geocentric($psiprime, $lambda, $rho);
 
 This method sets the L</Geocentric> coordinates represented by the
 object in terms of L</Geocentric latitude> psiprime and L</Longitude>
-lamda in radians, and distance from the center of the Earth rho in
+lambda in radians, and distance from the center of the Earth rho in
 kilometers.
 
 This method can also be called as a class method, in which case it
@@ -838,7 +882,7 @@ essentially, spherical coordinates.
 The algorithm for conversion between geocentric and ECEF is the
 author's.
 
-=item ($psiprime, $lamda, $rho) = $coord->geocentric();
+=item ($psiprime, $lambda, $rho) = $coord->geocentric();
 
 This method returns the L</Geocentric latitude>, L</Longitude>, and
 distance to the center of the Earth.
@@ -853,11 +897,11 @@ my $self = shift;
 $self = $self->_check_coord (geocentric => \@_);
 
 unless (@_) {
-    return @{$self->{geocentric} ||= do {
+    return @{$self->{_ECI_cache}{fixed}{geocentric} ||= do {
 	my ($x, $y, $z, $xdot, $ydot, $zdot) = $self->ecef;
 	my $rsq = $x * $x + $y * $y;
 	my $rho = sqrt ($z * $z + $rsq);
-	my $lamda = atan2 ($y, $x);
+	my $lambda = atan2 ($y, $x);
 	my $psiprime = atan2 ($z, sqrt ($rsq));
 	$self->get ('debug') and print <<eod;
 Debug geocentric () - ecef -> geocentric
@@ -867,24 +911,24 @@ Debug geocentric () - ecef -> geocentric
         z = $z
     outputs:
         psiprime = $psiprime
-        lamda = $lamda
+        lambda = $lambda
         rho = $rho
 eod
-	[$psiprime, $lamda, $rho];
+	[$psiprime, $lambda, $rho];
 	}};
     }
 
 if (@_ == 3) {
-    my ($psiprime, $lamda, $rho) = @_;
+    my ($psiprime, $lambda, $rho) = @_;
     my $z = $rho * sin ($psiprime);
     my $r = $rho * cos ($psiprime);
-    my $x = $r * cos ($lamda);
-    my $y = $r * sin ($lamda);
+    my $x = $r * cos ($lambda);
+    my $y = $r * sin ($lambda);
     $self->get ('debug') and print <<eod;
 Debug geocentric () - geocentric -> ecef
     inputs:
         psiprime = $psiprime
-        lamda = $lamda
+        lambda = $lambda
         rho = $rho
     outputs:
         x = $x
@@ -892,7 +936,7 @@ Debug geocentric () - geocentric -> ecef
         z = $z
 eod
     $self->ecef ($x, $y, $z);
-    $self->{geocentric} = [@_];
+    $self->{_ECI_cache}{fixed}{geocentric} = [@_];
     $self->{specified} = 'geocentric';
     $self->{inertial} = 0;
     }
@@ -909,10 +953,10 @@ $self;
 
 =for comment help syntax highlighting editor "
 
-=item $coord = $coord->geodetic($psi, $lamda, $h, $ellipsoid);
+=item $coord = $coord->geodetic($psi, $lambda, $h, $ellipsoid);
 
 This method sets the L</Geodetic> coordinates represented by the object
-in terms of its L</Geodetic latitude> psi and L</Longitude> lamda in
+in terms of its L</Geodetic latitude> psi and L</Longitude> lambda in
 radians, and its height h above mean sea level in kilometers.
 
 The ellipsoid argument is the name of a L</Reference Ellipsoid> known
@@ -928,7 +972,7 @@ The conversion from geodetic to geocentric comes from Jean Meeus'
 
 B<This is the method that should be used with map coordinates.>
 
-=item ($psi, $lamda, $h) = $coord->geodetic($ellipsoid);
+=item ($psi, $lambda, $h) = $coord->geodetic($ellipsoid);
 
 This method returns the geodetic latitude, longitude, and height
 above mean sea level.
@@ -975,7 +1019,8 @@ unless (@_) {
 #	Return cached coordinates if they exist and we did not
 #	override the default ellipsoid.
 
-    return @{$self->{geodetic}} if $self->{geodetic} && !$elps;
+    return @{$self->{_ECI_cache}{fixed}{geodetic}}
+	if $self->{_ECI_cache}{fixed}{geodetic} && !$elps;
     $self->{debug} and do {
 	local $Data::Dumper::Terse = 1;
 	print "Debug geodetic - explicit ellipsoid ", Dumper ($elps);
@@ -993,7 +1038,7 @@ unless (@_) {
 
 #	Calculate geodetic coordinates.
 
-    my ($phiprime, $lamda, $rho) = $self->geocentric;
+    my ($phiprime, $lambda, $rho) = $self->geocentric;
     my $r = $rho * cos ($phiprime);
     my $b = $elps->{semimajor} * (1- $elps->{flattening});
     my $a = $elps->{semimajor};
@@ -1042,7 +1087,7 @@ unless (@_) {
 #	Cache the results of the calculation if they were done using
 #	the default ellipsoid.
 
-    $self->{geodetic} = [$phi, $lamda, $h] unless $elps;
+    $self->{_ECI_cache}{fixed}{geodetic} = [$phi, $lambda, $h] unless $elps;
 
 
 #	Return the results in any event.
@@ -1051,7 +1096,7 @@ unless (@_) {
 Debug geodetic: geocentric to geodetic
     inputs:
         phiprime = $phiprime
-        lamda = $lamda
+        lambda = $lambda
         rho = $rho
     intermediates:
         z = $z
@@ -1072,7 +1117,7 @@ Debug geodetic: geocentric to geodetic
           = @{[$r - $a * $t]} * cos (phi) + @{[$z - $b]} * sin (phi)
           = $h (kilometers)
 eod
-    return ($phi, $lamda, $h);
+    return ($phi, $lambda, $h);
     }
 
 
@@ -1088,7 +1133,7 @@ if (@_ == 3) {
 
 #	Calculate the geocentric data.
 
-    my ($phi, $lamda, $h) = @_;
+    my ($phi, $lambda, $h) = @_;
     my $bovera = 1 - $self->{flattening};
 
 
@@ -1110,12 +1155,12 @@ if (@_ == 3) {
 
 #	Set the geocentric data as the coordinates.
 
-    $self->geocentric ($phiprime, $lamda, $rho);
+    $self->geocentric ($phiprime, $lambda, $rho);
  
  
  #	Cache the geodetic coordinates.
  
-    $self->{geodetic} = [$phi, $lamda, $h];
+    $self->{_ECI_cache}{fixed}{geodetic} = [$phi, $lambda, $h];
     $self->{specified} = 'geodetic';
     $self->{inertial} = 0;
     }
@@ -1194,19 +1239,28 @@ unless (@_) {
     $self->{universal} || croak <<eod;
 Error - Object's time has not been set.
 eod
-    return ($self->{local_mean_time} ||=
-	$self->universal + _local_mean_delta ($self));
+    $self->{local_mean_time} = $self->universal () +
+	_local_mean_delta ($self)
+	unless defined $self->{local_mean_time};
+    return $self->{local_mean_time};
      }
 
 if (@_ == 1) {
     $self->{specified} or croak <<eod;
 Error - Object's coordinates have not been set.
 eod
-    delete $self->{dynamical};
+    $self->{inertial} and croak <<eod;
+Error - You can not set the local time of an object that represents
+       a position in an inertial coordinate system, because this
+       causes the earth-fixed position to change, invalidating the
+       local time.
+    $self->can ('time_set') and croak <<eod;
+Error - You can not set the local time on an @{[ref $self]}
+        object, because when you do the time_set() method will just
+	move the object, invalidating the local time.
+eod
+    $self->universal ($_[0] - _local_mean_delta ($self));
     $self->{local_mean_time} = $_[0];
-    $self->{universal} = $_[0] - _local_mean_delta ($self);
-    $self->{_need_purge} = 1;
-    $self->can ('time_set') and $self->time_set ();
     }
   else {
     croak <<eod;
@@ -1729,10 +1783,20 @@ eod
 
 if (@_ == 1) {
     $self = $self->new () unless ref $self;
+    return $self if defined $self->{universal} &&
+	$_[0] == $self->{universal};
     delete $self->{local_mean_time};
     delete $self->{dynamical};
     $self->{universal} = shift;
-    $self->{_need_purge} = 1 if $self->{specified};
+    if ($self->{specified}) {
+	if ($self->{inertial}) {
+##	    $self->{_need_purge} = 1;
+	    delete $self->{_ECI_cache}{fixed};
+	    }
+	  else {
+	    delete $self->{_ECI_cache}{inertial};
+	    }
+	}
     $self->can ('time_set') && !$self->{_no_set} and do {
 	$self->{_no_set} = 1;
 	$self->time_set ();
@@ -1796,17 +1860,62 @@ if ($self->{specified}) {
 #	Cached coordinate deletion moved to ecef(), so it's only done once.
 	}
       elsif ($self->{_need_purge}) {
+	delete $self->{_need_purge};
 	my $spec = $self->{specified};
-	my $data = $self->{$spec};
+	my $data = [$self->$spec ()];
 	foreach my $key (@kilatr) {delete $self->{$key}}
 	$self->$spec (@$data);
-	delete $self->{_need_purge};
 	}
     }
 
 $self;
 }
 
+#	@eci = $self->_convert_ecef_to_eci ()
+
+#	This subroutine converts the object's ECEF setting to ECI, and
+#	both caches and returns the result.
+
+sub _convert_ecef_to_eci {
+my $self = shift;
+my $thetag = thetag ($self->universal);
+my @data = $self->ecef ();
+$self->{debug} and print <<eod;
+Debug eci - thetag = $thetag
+    (x, y) = (@data[0, 1])
+eod
+my $costh = cos ($thetag);
+my $sinth = sin ($thetag);
+@data[0, 1] = ($data[0] * $costh - $data[1] * $sinth,
+	$data[0] * $sinth + $data[1] * $costh);
+@data[3, 4] = ($data[3] * $costh - $data[4] * $sinth,
+	$data[3] * $sinth + $data[4] * $costh);
+$self->{debug} and print <<eod;
+Debug eci - after rotation,
+    (x, y) = (@data[0, 1])
+eod
+$data[3] += $data[1] * $self->{angularvelocity};
+$data[4] -= $data[0] * $self->{angularvelocity};
+return @{$self->{_ECI_cache}{inertial}{eci} = [@data]};
+}
+
+#	This subroutine converts the object's ECI setting to ECEF, and
+#	both caches and returns the result.
+
+sub _convert_eci_to_ecef {
+my $self = shift;
+my $thetag = thetag ($self->universal);
+my @ecef = $self->eci ();
+$ecef[3] -= $ecef[1] * $self->{angularvelocity};
+$ecef[4] += $ecef[0] * $self->{angularvelocity};
+my $costh = cos (- $thetag);
+my $sinth = sin (- $thetag);
+@ecef[0, 1] = ($ecef[0] * $costh - $ecef[1] * $sinth,
+	$ecef[0] * $sinth + $ecef[1] * $costh);
+@ecef[3, 4] = ($ecef[3] * $costh - $ecef[4] * $sinth,
+	$ecef[3] * $sinth + $ecef[4] * $costh);
+return @{$self->{_ECI_cache}{fixed}{ecef} = [@ecef]};
+}
 
 #	$value = _local_mean_delta ($coord)
 
@@ -1873,7 +1982,7 @@ method.
 This attribute turns on debugging output. The only supported value of
 this attribute is 0. That is to say, the author makes no guarantees of
 what will happen if you set it to some other value, nor does he
-guarantee that this behaviour will not change from release to release.
+guarantee that this behavior will not change from release to release.
 
 The default is 0.
 
@@ -2152,7 +2261,7 @@ minutes in an hour, and 24 hours in a circle.
 
 See L</Earth-Centered, Earth-fixed (ECEF) coordinates>.
 
-=head1 ACKNOWLEDGEMENTS
+=head1 ACKNOWLEDGMENTS
 
 The author wishes to acknowledge the following individuals and
 organizations.
