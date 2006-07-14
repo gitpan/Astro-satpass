@@ -10,13 +10,17 @@ use Cwd;
 use File::Spec;
 use Test;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 #	We may need IO::String for the test. If we do, make sure it
 #	is available. If it is not, skip everything.
 
 my $gblskip = $] >= 5.008 && $Config{useperlio} ? '' :
     not_available ('IO::String');
+
+#	We also need Date::Manip.
+
+$gblskip ||= not_available ('Date::Manip');
 
 #	Initialize.
 
@@ -25,6 +29,7 @@ my $failure;		# Notes to output if the next test fails.
 my $home = getcwd;	# Directory test runs in.
 my $skip;		# Skip indicator
 my $test = 0;		# Test number;
+my @todo = ();		# Tests expected to fail.
 
 sub satpass {
 my $handle = shift;
@@ -45,9 +50,12 @@ use warnings qw{once};
 #	there are. Tell the Test package how many.
 
 my $start = tell ($handle);
-while (<$handle>) {$test++ if m/^\s*-test\b/}
+while (<$handle>) {
+    if (m/^\s*-test\b/) {$test++}
+      elsif (m/^\s*-todo\b/) {push @todo, $test}
+    }
 seek ($handle, $start, 0);
-plan tests => $test;
+plan tests => $test, todo => \@todo;
 
 #	We start from test 1 (since we increment before use).
 
@@ -218,6 +226,12 @@ eod
 	$failure = undef;
 	next;
 	};
+
+#	-todo tells the tester that the PREVIOUS -test is expected to
+#	fail. It is no-opped here, because we took care of it in the
+#	first pass through the test script.
+
+    s/-todo\b\s*// and next;
 
 #	-unlink unlinks the named file. It would be nice if there were
 #	automatic cleanup, but there is not.
