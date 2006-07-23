@@ -3,29 +3,37 @@
 use strict;
 use warnings;
 
+use Module::Build;
 use Config;
-use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
-use Getopt::Std;
 
-our $VERSION = '0.003';
+our $VERSION = '0.001';
 
-my %opt;
-getopts ('ny', \%opt) or die <<eod;
-The only legal options are
-  -n = answer all questions 'no'.
-  -y = answer all questions 'yes'.
-You may not assert both of these at once - it is too confusing.
-eod
+my $bldr = Module::Build->new (
+	dist_author => 'Tom Wyant (wyant at cpan dot org)',
+	dist_abstract => 'Classes and app to compute satellite visibility',
+	module_name => 'Astro::Coord::ECI',
+	dist_name => 'Astro-satpass',
+	dist_version_from => 'ECI.pm',
+
+	get_options => {y => {}, n => {}},
+	pm_files => {
+	    'ECI.pm' => 'lib/Astro/Coord/ECI.pm',
+	    'ECI/Moon.pm' => 'lib/Astro/Coord/ECI/Moon.pm',
+	    'ECI/Star.pm' => 'lib/Astro/Coord/ECI/Star.pm',
+	    'ECI/TLE.pm' => 'lib/Astro/Coord/ECI/TLE.pm',
+	    'ECI/TLE/Set.pm' => 'lib/Astro/Coord/ECI/TLE/Set.pm',
+	    'ECI/Utils.pm' => 'lib/Astro/Coord/ECI/Utils.pm',
+	    },
+	dynamic_config => 1,
+	license => 'perl',
+	);
+
+my %opt = $bldr->args ();
 
 my @exe_files;
 my @clean_files;
 my @prereq;
-
-eval {
-    require t::Ctags;		# Make 'make' generate tags file.
-    push @clean_files, 'tags';	# Clean it up.
-};
 
 print <<eod;
 
@@ -34,7 +42,7 @@ The following executable can be installed:
   satpass is a scriptable program to predict satellite passes
     over a given observer.
 
-If you do not want this, run Makefile.PL with the -n option.
+If you do not want this, run Build.PL with the -n option.
 
 Unless you are running MSWin32 or VMS (which are special-cased),
 I will assume you are running some version of U*ix, and behave
@@ -142,21 +150,9 @@ eod
 ##my $vers = $] >= 5.008 ? '-5.8' : '';
 my $vers = '';
 
-WriteMakefile (
-	NAME => 'Astro::Coord::ECI',
-	DISTNAME => 'Astro-satpass',
-	VERSION_FROM => 'ECI.pm',
-	PREREQ_PM => {
-			@prereq
-			},
-	EXE_FILES => \@exe_files,
-#	'linkext' => {LINKTYPE => ''},
-	'dist' => {COMPRESS => 'gzip', SUFFIX => 'gz'},
-	realclean => {FILES => join ' ', @clean_files},
-	$] >= 5.005 ? (
-		AUTHOR => 'Tom Wyant (wyant at cpan dot org)',
-		ABSTRACT => 'Classes and app to compute satellite visibility',
-		BINARY_LOCATION => "$Config{archname}$vers/Astro-satpass.tar.gz",
-		) : (),
-	);
+$bldr->requires ({@prereq});
+$bldr->add_to_cleanup (\@clean_files);
+$bldr->script_files (\@exe_files);
+
+$bldr->create_build_script ();
 

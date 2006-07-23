@@ -1,11 +1,39 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         Astro-satpass
-version:      0.008
-version_from: ECI.pm
-installdirs:  site
+---
+name: Astro-satpass
+version: !!perl/hash:Module::Build::Version
+  original: 0.009
+  version:
+    - 0
+    - 9
+author:
+  - Tom Wyant (wyant at cpan dot org)
+abstract: Classes and app to compute satellite visibility
+license: perl
+resources:
+  license: http://dev.perl.org/licenses/
 requires:
-    Date::Manip:                   1.14
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.30
+  Date::Manip: 1.14
+dynamic_config: 1
+provides:
+  Astro::Coord::ECI:
+    file: ECI.pm
+    version: 0.009
+  Astro::Coord::ECI::Moon:
+    file: ECI/Moon.pm
+    version: 0.002
+  Astro::Coord::ECI::Star:
+    file: ECI/Star.pm
+    version: 0.003
+  Astro::Coord::ECI::TLE:
+    file: ECI/TLE.pm
+    version: 0.006
+  Astro::Coord::ECI::TLE::Set:
+    file: ECI/TLE/Set.pm
+    version: 0.002
+  Astro::Coord::ECI::Utils:
+    file: ECI/Utils.pm
+    version: 0.006
+generated_by: Module::Build version 0.2804
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.2.html
+  version: 1.2

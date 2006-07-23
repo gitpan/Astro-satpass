@@ -8,9 +8,9 @@ use t::SetDelegate;
 use Test;
 use Time::Local;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
-plan tests => 46, todo => [];
+plan tests => 53, todo => [];
 
 my $test = 0;
 
@@ -196,7 +196,7 @@ eod
 
 foreach my $single (0, 1) {
 
-    $Astro::Coord::ECI::TLE::Set::Singleton = $single;
+    local $Astro::Coord::ECI::TLE::Set::Singleton = $single;
 
     my @set = eval {Astro::Coord::ECI::TLE::Set->aggregate (
 		dummy (timegm (0, 0, 0, 1, 6, 2006), 99999),
@@ -237,6 +237,24 @@ eod
     }
 
 }
+
+{	# Begin local symbol block.
+
+    my $set1 = Astro::Coord::ECI::TLE::Set->new (
+	t::SetDelegate->new (id => 99999, name => 'Anonymous',
+	epoch => timegm (0, 0, 0, 1, 6, 2006)));
+    my $set2 = Astro::Coord::ECI::TLE::Set->new ();
+    eval {$set2->add ($set1)};
+    $test++;
+    my $got = $set2->members ();
+    print <<eod;
+#
+# Test $test - Add a set to another set.
+#    Expected: 1 member.
+#         Got: $got member@{[$got == 1 ? '' : 's']}
+eod
+    ok ($got == 1);
+}	# End local symbol block.
 
 {	# Begin local symbol block.
     my $set = Astro::Coord::ECI::TLE::Set->new (
@@ -292,6 +310,39 @@ eod
     }
 
 }	# End of local symbol block.
+
+{	# Begin local symbol block.
+    my $set = Astro::Coord::ECI::TLE::Set->new ();
+    my $members = 0;
+    foreach ([represents => undef, 'Exception thrown'],
+	    [represents => 'Astro::Coord::ECI', 'Exception thrown'],
+	    [add => dummy (timegm (0, 0, 0, 6, 1, 2006), 99999)],
+	    [represents => undef, 'Astro::Coord::ECI::TLE'],
+	    [represents => 'Astro::Coord::ECI', 1],
+	    [represents => 'Astro::Coord::ECI::TLE', 1],
+	    [represents => 'Astro::Coord::ECI::TLE::Set', 0],
+	    ) {
+	my ($method, @args) = @$_;
+	if ($method eq 'represents') {
+	    my ($arg, $want) = @args;
+	    my $got = eval {$set->represents ($arg)};
+	    $got = 'Exception thrown' if $@;
+	    $test++;
+	    print <<eod;
+#
+# Test $test - \$set->represents (@{[defined $arg ? "'$arg'" : 'undef']})
+#   Members: $members
+#    Expect: $want
+#       Got: $got
+eod
+	    $want =~ m/\D/ ? ok ($want eq $got) : ok ($want == $got);
+	} else {
+	    $set->$method (@args);
+	    $members = $set->members ();
+	}
+    }
+}
+
 
 ########################################################################
 #

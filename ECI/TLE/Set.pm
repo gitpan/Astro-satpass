@@ -112,7 +112,7 @@ package Astro::Coord::ECI::TLE::Set;
 use Carp;
 use UNIVERSAL qw{isa};
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 use constant ERR_NOCURRENT => <<eod;
 Error - Can not call %s because there is no current member. Be
@@ -165,7 +165,8 @@ foreach (@{$self->{members}}) {
     $class ||= ref $tle;
     $ep{$tle->get ('epoch')} = $tle;
     }
-foreach my $tle (@_) {
+foreach my $tle (map {UNIVERSAL::isa ($_, __PACKAGE__) ?
+	$_->members : $_} @_) {
     my $aid = $tle->get ('id');
     if (defined $id) {
 	croak <<eod unless ref $tle && isa ($tle, $class);
@@ -319,18 +320,17 @@ $self->{current};
 This method iterates over the individual name-value pairs. If the name
 is an attribute of Astro::Coord::ECI::TLE and is not 'debug' or
 'model', it calls set_selected($name, $value). Otherwise, it calls
-set_all($name, $value).
+set_all($name, $value). If the set has no members, this method
+simply returns.
 
 =cut
 
-my %tle_exception = map {$_ => 1} qw{debug model};
-
 sub set {
 my $self = shift;
+return unless $self->{current};
 while (@_) {
     my $name = shift;
-    if ($self->attribute ($name) eq 'Astro::Coord::ECI::TLE' &&
-	    !$tle_exception{$name}) {
+    if ($self->{current}->is_model_attribute ($name)) {
 	$self->set_selected ($name, shift);
 	}
       else {
@@ -383,7 +383,8 @@ our $AUTOLOAD;
 (my $routine = $AUTOLOAD) =~ s/.*:://;
 my $delegate = $_[0]{current} or
     croak sprintf ERR_NOCURRENT, $routine;
-if (@_ > 1 && ($selector{$routine} || $delegate->can ("_model_$routine"))) {
+if (@_ > 1 && ($selector{$routine} ||
+	$delegate->is_valid_model ($routine))) {
     $_[0]->select ($_[1]);
     $delegate = $_[0]{current};
     }

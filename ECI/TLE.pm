@@ -102,7 +102,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 
 use base qw{Astro::Coord::ECI};
 
@@ -161,20 +161,6 @@ use constant SGP_RHO => .15696615;
 # XNO => meanmotion
 
 
-#	Legal model names.
-
-no warnings qw{once};
-*_model_model = \&model;
-*_model_model4 = \&model4;
-*_model_model8 = \&model8;
-*_model_null = \&null;
-*_model_sdp4 = \&sdp4;
-*_model_sdp8 = \&sdp8;
-*_model_sgp = \&sgp;
-*_model_sgp4 = \&sgp4;
-*_model_sgp8 = \&sgp8;
-use warnings qw{once};
-
 #	List all the legitimate attributes for the purposes of the
 #	get and set methods. Possible values of the hash are:
 #	    undef => read-only attribute
@@ -193,7 +179,7 @@ my %attrib = (
     epoch => sub {
 	$_[0]->{$_[1]} = $_[2];
 	$_[0]->{ds50} = $_[0]->ds50 ();
-	0},
+	1},
     firstderivative => 1,
     secondderivative => 1,
     bstardrag => 1,
@@ -201,7 +187,7 @@ my %attrib = (
     elementnumber => 0,
     inclination => 1,
     model => sub {
-	$_[2] and $_[0]->can ("_model_$_[2]") || croak <<eod;
+	$_[0]->is_valid_model ($_[2]) || croak <<eod;
 Error - Illegal model name '$_[2]'.
 eod
 	$_[0]->{$_[1]} = $_[2];
@@ -219,6 +205,13 @@ eod
 my %static = (
     model => 'model',
     );
+my %model_attrib = (	# For the benefit of is_model_attrib()
+    ds50 => 1,		# Read-only, but it fits the definition.
+    epoch => 1,		# Hand-set, since we dont want to call the code.
+    );
+foreach (keys %attrib) {
+    $model_attrib{$_} = 1 if $attrib{$_} && !ref $attrib{$_}
+    }
 
 use constant TLE_INIT => '_init';
 
@@ -241,6 +234,8 @@ my $class = shift;
 my $self = $class->SUPER::new (%static, @_);
 $self;
 }
+
+#	See Astro::Coord::ECI for docs.
 
 sub attribute {
 $attrib{$_[1]} ? __PACKAGE__ : $_[0]->SUPER::attribute ($_[1])
@@ -317,6 +312,42 @@ sub is_deep {
 return $_[0]->{&TLE_INIT}{TLE_isdeep} if exists $_[0]->{&TLE_INIT}{TLE_isdeep};
 return ($_[0]->{&TLE_INIT}{TLE_isdeep} = $_[0]->period () >= 13500);
 }
+
+=item $boolean = $tle->is_model_attribute ($name);
+
+This method returns true if the named attribute is an attribute of
+the model - i.e. it came from the TLE data and actually affects the
+computations. It is really for the benefit of
+Astro::Coord::ECI::TLE::Set, so that class can determine how its
+set() method should handle the attribute.
+
+=cut
+
+sub is_model_attribute { $model_attrib{$_[1]} }
+
+=item $boolean = $tle->is_valid_model ($model_name);
+
+This method returns true if the given name is the name of an orbital
+model, and false otherwise.
+
+Actually, in the spirit of UNIVERSAL::can, it returns a reference to
+the code if the model exists, and undef otherwise.
+
+This is really for the benefit of Astro::Coord::ECI::TLE::Set, so it
+can select the correct member object before running the model.
+
+=cut
+
+{	# Begin local symbol block
+
+my %valid = map {$_ => UNIVERSAL::can (__PACKAGE__, $_)}
+    qw{model model4 model8 null sdp4 sdp8 sgp sgp4 sgp8};
+
+    sub is_valid_model {
+    $valid{$_[1]}
+    }
+
+}	# End local symbol block
 
 
 =item $tle = $tle->model($time)
