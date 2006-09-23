@@ -7,7 +7,7 @@ use Module::Build;
 use Config;
 use FileHandle;
 
-our $VERSION = '0.001';
+our $VERSION = '0.003';
 
 my $bldr = Module::Build->new (
 	dist_author => 'Tom Wyant (wyant at cpan dot org)',
@@ -21,6 +21,7 @@ my $bldr = Module::Build->new (
 	    'ECI.pm' => 'lib/Astro/Coord/ECI.pm',
 	    'ECI/Moon.pm' => 'lib/Astro/Coord/ECI/Moon.pm',
 	    'ECI/Star.pm' => 'lib/Astro/Coord/ECI/Star.pm',
+	    'ECI/Sun.pm' => 'lib/Astro/Coord/ECI/Sun.pm',
 	    'ECI/TLE.pm' => 'lib/Astro/Coord/ECI/TLE.pm',
 	    'ECI/TLE/Set.pm' => 'lib/Astro/Coord/ECI/TLE/Set.pm',
 	    'ECI/Utils.pm' => 'lib/Astro/Coord/ECI/Utils.pm',
@@ -151,7 +152,7 @@ eod
 my $vers = '';
 
 $bldr->requires ({@prereq});
-$bldr->add_to_cleanup (\@clean_files);
+$bldr->add_to_cleanup (@clean_files);
 $bldr->script_files (\@exe_files);
 
 $bldr->create_build_script ();
