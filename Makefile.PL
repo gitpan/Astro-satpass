@@ -8,7 +8,7 @@ use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
 use Getopt::Std;
 
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 my %opt;
 getopts ('ny', \%opt) or die <<eod;
@@ -20,7 +20,8 @@ eod
 
 my @exe_files;
 my @clean_files;
-my @prereq;
+my @prereq = (
+    );
 
 eval {
     require t::Ctags;		# Make 'make' generate tags file.
@@ -145,7 +146,7 @@ my $vers = '';
 WriteMakefile (
 	NAME => 'Astro::Coord::ECI',
 	DISTNAME => 'Astro-satpass',
-	VERSION_FROM => 'ECI.pm',
+	VERSION_FROM => 'lib/Astro/Coord/ECI.pm',
 	PREREQ_PM => {
 			@prereq
 			},
