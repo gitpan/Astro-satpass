@@ -34,7 +34,7 @@ use warnings;
 
 package Astro::Coord::ECI::Star;
 
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 
 use base qw{Astro::Coord::ECI};
 
@@ -144,11 +144,12 @@ in kilometers per second.
 
 The range defaults to 1 parsec, which is too close but probably good
 enough since we do not take parallax into account when computing
-position, and since you can override it with a range (in km!) if you
-so desire. The proper motions default to 0. The time defaults to
-J2000.0. If you are not interested in proper motion but are interested
-in time, omit the proper motion arguments completely and specify time
-as the fourth argument.
+position, and since you can override it with a range (in km!) if you so
+desire. The proper motions default to 0. The time defaults to J2000.0,
+and is used to set not only the current time of the object but also the
+equinox_dynamical. If you are not interested in proper motion but are
+interested in time, omit the proper motion arguments completely and
+specify time as the fourth argument.
 
 If you call this as a class method, a new Astro::Coord::ECI::Star
 object will be constructed. If you call it without arguments, the
@@ -162,19 +163,21 @@ position of the star in question.
 =cut
 
 sub position {
-my $self = shift;
-return @{$self->{_star_position}} unless @_;
-my @args = @_;
-$args[2] ||= PARSEC;
-@args < 5 and splice @args, 3, 0, 0, 0, 0;
-$args[3] ||= 0;
-$args[4] ||= 0;
-$args[5] ||= 0;
-$args[6] ||= PERL2000;
-$self = $self->new () unless ref $self;
-$self->{_star_position} = [@args];
-$self->dynamical ($args[6]);
-$self;
+    my $self = shift;
+    return @{$self->{_star_position}} unless @_;
+    my @args = @_;
+    $args[2] ||= PARSEC;
+    @args < 5 and splice @args, 3, 0, 0, 0, 0;
+    $args[3] ||= 0;
+    $args[4] ||= 0;
+    $args[5] ||= 0;
+    $args[6] ||= PERL2000;
+    $self = $self->new () unless ref $self;
+    $self->{_star_position} = [@args];
+    # CAVEAT: time_set() picks the equinox directly out of the above
+    # hash.
+    $self->dynamical ($args[6]);
+    $self;
 }
 
 =item $star->time_set()
@@ -190,6 +193,10 @@ time is set.
 
 The computation comes from Jean Meeus' "Astronomical Algorithms", 2nd
 Edition, Chapter 23, pages 149ff.
+
+B<Note>, however, that for consistency with the Astro::Coord::ECI::Sun
+and ::Moon classes, the position is precessed to the current time
+setting.
 
 =cut
 
@@ -214,12 +221,18 @@ my $deltat = $end - $epoch;
 $ra += $mra * $deltat;
 $dec += $mdc * $deltat;
 $range += $mrg * $deltat;
-$self->dynamical ($epoch)->equatorial ($ra, $dec, $range);
+##!! $self->set (equinox => $epoch);
+$self->equatorial ($ra, $dec, $range);
 
-#	Precess ourselves to the correct time.
-
-$self->precess ($time);
-
+#	NOTE: The call to precess() used to be here. I have no idea why,
+#	other than that I thought I could go back and forth between
+#	coordinates less (since I implemented in terms equatorial
+#	coordinates). It seems to me at this point (version 0.003_04,
+#	25-Oct-2007) that since precessing to a different equinox is
+#	actually just a coordinate transform that it should come last.
+#	Meeus actually gives the algorithm in ecliptic coordinates also;
+#	if the transform could be smart, I could skip a couple
+#	coordinate transforms.
 
 #	Get ecliptic coordinates, and correct for nutation.
 
@@ -246,6 +259,17 @@ $lambda += $deltalamda;
 $beta += $deltabeta;
 
 $self->ecliptic ($beta, $lambda, $range);
+
+#	Set the equinox to that implied when our position was set.
+
+## $self->set (equinox_dynamical => $epoch);
+$self->equinox_dynamical ($epoch);
+
+#	Precess ourselves to the current equinox.
+
+$self->precess_dynamical ($end);
+
+$self;
 }
 
 
@@ -276,8 +300,10 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT
 
-Copyright 2005, 2006 by Thomas R. Wyant, III
+Copyright 2005, 2006, 2007 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
+
+=head1 LICENSE
 
 This module is free software; you can use it, redistribute it
 and/or modify it under the same terms as Perl itself. Please see

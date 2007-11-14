@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+use 5.006;	# for 'our'.
 
 use strict;
 use warnings;
@@ -8,7 +8,7 @@ use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
 use Getopt::Std;
 
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 
 my %opt;
 getopts ('ny', \%opt) or die <<eod;

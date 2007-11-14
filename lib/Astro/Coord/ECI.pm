@@ -60,20 +60,17 @@ whatever.
 All distances are in kilometers, and all angles are in radians
 (including right ascension, which is usually measured in hours).
 
-Times are normal Perl times except for the Julian Day routines, which
-convert Perl time into things like Julian Day or days since Julian
-2000.0 (i.e. the aforementioned support routines), and for a few
-support routines which take or return dynamical times. Time is
-specified and returned in universal time unless the documentation of
-the method explicitly states otherwise. In practice, universal time is
-approximated by normal Perl time.
+Times are normal Perl times, whether used as universal or dynamical
+time. Universal time is what is usually meant, unless otherwise stated.
 
 Known subclasses include B<Astro::Coord::ECI::Moon> to predict the
 position of the Moon, B<Astro::Coord::ECI::Star> to predict the
 position of a star, or anything else that can be considered fixed on
 the celestial sphere, B<Astro::Coord::ECI::Sun> to predict the position
-of the Sun, and B<Astro::Coord::ECI::TLE> to predict the position of a
-satellite given the NORAD orbital parameters.
+of the Sun, B<Astro::Coord::ECI::TLE> to predict the position of a
+satellite given the NORAD orbital parameters, and
+B<Astro::Corod::ECI::TLE::Iridium> (a subclass of
+Astro::Coord::ECI::TLE) to predict Iridium flares.
 
 B<Caveat user:> This class and its subclasses should probably be
 considered alpha code, meaning that the public interface may not be
@@ -94,7 +91,7 @@ use warnings;
 
 package Astro::Coord::ECI;
 
-our $VERSION = '0.013';
+our $VERSION = '0.014';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -212,8 +209,6 @@ sub attribute {$mutator{$_[1]} ? __PACKAGE__ : undef}
 
 =item ($azimuth, $elevation, $range) = $coord->azel ($coord2, $upper);
 
-=for comment help syntax-highlighting editor "
-
 This method takes another coordinate object, and computes its azimuth,
 elevation, and range in reference to the object doing the computing.
 The return is azimuth in radians measured clockwise from North (always
@@ -225,7 +220,7 @@ the upper limb of the object, using the 'diameter' attribute of the
 $coord2 object.
 
 As a side effect, the time of the $coord object may be set from the
-$coord object.
+$coord2 object.
 
 If the L<refraction|/refraction> attribute of the $coord object is
 true, the elevation will be corrected for atmospheric refraction using
@@ -237,8 +232,6 @@ Coordinate Systems, Part II" and available at
 F<http://celestrak.com/columns/v02n02/>. If the object represents fixed
 coordinates, the author's algorithm is used, but the author confesses
 needing to refer to Dr. Kelso's work to get the signs right.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -315,17 +308,17 @@ if ($self->{inertial}) {
 #
 #	The entire rotation is therefore
 #
-#	+-                     -+   +-                        -+
+#	+-                     -+   +-                           -+
 #	|  sin(phi) 0 -cos(phi) |   |  cos(lambda)  sin(lambda) 0 |
 #	|      0    1     0     | x | -sin(lambda)  cos(lambda) 0 | =
-#	|  cos(phi) 0  sin(phi) |   |       0          0      1 |
-#	+-                     -+   +-                        -+
+#	|  cos(phi) 0  sin(phi) |   |       0          0        1 |
+#	+-                     -+   +-                           -+
 #
-#	+-                                                 -+
+#	+-                                                   -+
 #	|  cos(lambda)sin(phi)  sin(lambda)sin(phi) -cos(phi) |
 #	| -sin(lambda)          cos(lambda)             0     |
 #	|  cos(lambda)cos(phi)  sin(lambda)cos(phi)  sin(phi) |
-#	+-                                                 -+
+#	+-                                                   -+
 
     my $lclx = $coslamda * $sinphi * $delta[0] +
 	$sinlamda * $sinphi * $delta[1] - $cosphi * $delta[2];
@@ -358,8 +351,6 @@ $self->{refraction} and
 }
 
 
-=for comment help syntax-highlighting editor "
-
 =item $coord2 = $coord->clone ();
 
 This method does a deep clone of an object, producing a different
@@ -367,15 +358,11 @@ but identical object.
 
 It's really just a wrapper for Storable::dclone.
 
-=for comment help syntax-highlighting editor "
-
 =cut
 
 sub clone {
 dclone shift;
 }
-
-=for comment help syntax-highlighting editor "
 
 =item $elevation = $coord->correct_for_refraction ($elevation);
 
@@ -394,8 +381,6 @@ Saemundsson's article in "Sky and Telescope", volume 72, page 70
 (July 1986) as reported Jean Meeus' "Astronomical Algorithms",
 2nd Edition, chapter 16, page 106, and includes the adjustment
 suggested by Meeus.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -447,8 +432,6 @@ $elevation;
 }
 
 
-=for comment help syntax-highlighting editor "
-
 =item $angle = $coord->dip ();
 
 This method calculates the dip angle of the horizon due to the
@@ -457,8 +440,6 @@ above the surface of the reference ellipsoid, and positive for a
 location below the surface.
 
 The algorithm is simple enough to be the author's.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -471,8 +452,6 @@ my $angle = $h >= 0 ?
     acos ($rho / ($rho - $h));
 }
 
-
-=for comment help syntax-highlighting editor "
 
 =item $coord = $coord->dynamical ($time);
 
@@ -487,55 +466,54 @@ Meeus' "Astronomical Algorithms", 2nd Edition, Chapter 10, pages 78ff.
 =item $time = $coord->dynamical ();
 
 This method returns the dynamical time previously set, or the
-universal time previously set, converted to dynamical. The algorithm
+universal time previously set, converted to dynamical.
 
 The algorithm comes from Jean Meeus' "Astronomical Algorithms", 2nd
 Edition, Chapter 10, pages 78ff.
 
-=for comment help syntax-highlighting editor "
-
 =cut
 
 sub dynamical {
-my $self = shift;
-unless (@_) {
-    ref $self or croak <<eod;
+    my $self = shift;
+    unless (@_) {
+	ref $self or croak <<eod;
 Error - The dynamical() method may not be called as a class method
         unless you specify arguments.
 eod
-    return ($self->{dynamical} ||= $self->{universal} +
-	dynamical_delta ($self->{universal} || croak <<eod));
+	return ($self->{dynamical} ||= $self->{universal} +
+	    dynamical_delta ($self->{universal} || croak <<eod));
 Error - Universal time of object has not been set.
 eod
     }
 
-if (@_ == 1) {
-    $self = $self->new () unless ref $self;
-    $self->universal ($_[0] - dynamical_delta ($_[0]));
-    $self->{dynamical} = $_[0];
-    }
-  else {
-    croak <<eod;
+    if (@_ == 1) {
+	$self = $self->new () unless ref $self;
+	$self->{_no_set}++;	# Supress running the model if any
+	$self->universal ($_[0] - dynamical_delta ($_[0]));
+	$self->{dynamical} = $_[0];
+	--$self->{_no_set};	# Undo supression of model
+	$self->_call_time_set ();	# Run the model if any
+    } else {
+	croak <<eod;
 Error - The dynamical() method must be called with either zero
         arguments (to retrieve the time) or one argument (to set the
         time).
 eod
     }
 
-$self;
+    $self;
 }
 
 
 =item $coord = $coord->ecef($x, $y, $z, $xdot, $ydot, $zdot)
 
-=for comment help syntax-highlighting editor "
-
-This method sets the coordinates represented by the object in terms
-of L</Earth-Centered, Earth-fixed (ECEF) coordinates>, with x being
-latitude 0 longitude 0, y being latitude 0 longitude 90 degrees east,
-and z being latitude 90 degrees north. The velocities are optional, and
-will default to the rotational velocity at the point being set. The
-object itself is returned.
+This method sets the coordinates represented by the object in terms of
+L</Earth-Centered, Earth-fixed (ECEF) coordinates> in kilometers, with
+the x axis being latitude 0 longitude 0, the y axis being latitude 0
+longitude 90 degrees east, and the z axis being latitude 90 degrees
+north. The velocities in kilometers per second are optional, and will
+default to the rotational velocity at the point being set. The object
+itself is returned.
 
 This method can also be called as a class method, in which case it
 instantiates the desired object.
@@ -545,12 +523,22 @@ instantiates the desired object.
 This method returns the object's L</Earth-Centered, Earth-fixed (ECEF)
 coordinates>.
 
+If the original coordinate setting was in an inertial system (e.g. eci,
+equatorial, or ecliptic) B<and> the absolute difference between the
+current value of 'equinox_dynamical' and the current dynamical() setting
+is greater than the value of $Astro::Coord::ECI::EQUINOX_TOLERANCE, the
+coordinates will be precessed to the current dynamical time before
+conversion.  Yes, this should be done any time the equinox is not the
+current time, but for satellite prediction precession by a year or
+so does not seem to make much difference in practice. The default value
+of $Astro::Coord:ECI::EQUINOX_TOLERANCE is 365 days.  B<Note> that if
+this behavior or the default value of $EQUINOX_TOLERANCE begins to look
+like a bug, it will be changed, and noted in the documentation.
+
 B<Caveat:> Velocities are also returned, but should not at this point
 be taken seriously unless they were originally set by the same method
 that is returning them, since I have not at this point got the velocity
 transforms worked out.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -574,7 +562,8 @@ if (@_ == 3) {
 
 if (@_ == 6) {
     foreach my $key (@kilatr) {delete $self->{$key}}
-    $self->{_ECI_cache}{fixed}{ecef} = [@_];
+##    $self->{_ECI_cache}{fixed}{ecef} = [@_];
+    $self->{_ECI_cache} = {fixed => {ecef => [@_]}};
     $self->{specified} = 'ecef';
     $self->{inertial} = 0;
     }
@@ -591,15 +580,15 @@ $self;
 }
 
 
-=for comment help syntax-highlighting editor "
-
 =item $coord = $coord->eci ($x, $y, $z, $xdot, $ydot, $zdot, $time)
 
-This method sets the coordinates represented by the object in terms
-of L</Earth-Centered Inertial (ECI) coordinates>, time being universal
-time, x being 0 L</Right Ascension> 0 L</Declination>, y being 6 hours
-L</Right Ascension> 0 L</Declination>, and z being 90 degrees north
-L</Declination>. The velocities are optional, and will default to zero.
+This method sets the coordinates represented by the object in terms of
+L</Earth-Centered Inertial (ECI) coordinates> in kilometers, time being
+universal time, the x axis being 0 hours L</Right Ascension> 0 degrees
+L</Declination>, y being 6 hours L</Right Ascension> 0 degrees
+L</Declination>, and z being 90 degrees north L</Declination>. The
+velocities in kilometers per second are optional, and will default to
+zero.
 
 The time argument is optional if the time represented by the object
 has already been set (e.g. by the universal() or dynamical() methods).
@@ -626,12 +615,14 @@ to that time. The net effect of specifying a time is equivalent to
 
  ($x, $y, $z, $xdot, $ydot, $zdot) = $coord->universal($time)->eci()
 
+If the original coordinate setting was in a non-inertial system (e.g.
+ECEF or geodetic), the equinox_dynamical attribute will be set to the
+object's dynamical time.
+
 B<Caveat:> Velocities are also returned, but should not at this point
 be taken seriously unless they were originally set by the same method
 that is returning them, since I have not at this point got the velocity
 transforms worked out.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -654,7 +645,8 @@ eod
 
 if (@_ == 6) {
     foreach my $key (@kilatr) {delete $self->{$key}}
-    $self->{_ECI_cache}{inertial}{eci} = [@_];
+##    $self->{_ECI_cache}{inertial}{eci} = [@_];
+    $self->{_ECI_cache} = {inertial => {eci => [@_]}};
     $self->{specified} = 'eci';
     $self->{inertial} = 1;
     }
@@ -669,8 +661,6 @@ eod
 $self;
 }
 
-
-=for comment help syntax highlighting editor "
 
 =item $coord = $coord->ecliptic ($latitude, $longitude, $range, $time);
 
@@ -695,8 +685,6 @@ This method returns the ecliptic latitude and longitude of the
 object at the given time. The time is optional if the time represented
 by the object has already been set (e.g. by the universal() or
 dynamical() methods).
-
-=for comment help syntax highlighting editor "
 
 =cut
 
@@ -729,6 +717,8 @@ if (@_ == 3) {
     my ($beta, $lambda, $rho) = @_;
 
     $lambda = mod2pi ($lambda);
+    $beta = mod2pi ($beta);
+
     my $epsilon = obliquity ($self->dynamical);
     my $sinlamda = sin ($lambda);
     my $cosepsilon = cos ($epsilon);
@@ -739,7 +729,9 @@ if (@_ == 3) {
 	$sinbeta / $cosbeta * $sinepsilon, cos ($lambda)));
     my $delta = asin ($sinbeta * $cosepsilon +		# Meeus (13.4), pg 93.
 	$cosbeta * $sinepsilon * $sinlamda);
-    $self->{debug} and print <<eod;
+    $self->{debug} and do {
+	$beta >= PI and $beta -= TWOPI;
+	print <<eod;
 Debug ecliptic -
     beta = $beta (ecliptic latitude, radians)
          = @{[rad2deg ($beta)]} (ecliptic latitude, degrees)
@@ -750,6 +742,7 @@ Debug ecliptic -
     alpha = $alpha (right ascension, radians)
     delta = $delta (declination, radians)
 eod
+    };
     $self->equatorial ($alpha, $delta, $rho);
     $self->{_ECI_cache}{inertial}{ecliptic} = [@_];
     $self->{specified} = 'ecliptic';
@@ -793,8 +786,8 @@ This method returns the apparent equatorial coordinates of the object
 represented by $coord2, as seen from the location represented by
 $coord.
 
-As a side effect, the time of the $coord object is set from the
-$coord object.
+As a side effect, the time of the $coord object may be set from the
+$coord2 object.
 
 If the L<refraction|/refraction> attribute of the $coord object is
 true, the coordinates will be corrected for atmospheric refraction using
@@ -886,8 +879,29 @@ eod
 $self;
 }
 
+=item $coord = $coord->equinox_dynamical ($value);
 
-=for comment help syntax highlighting editor "
+This method sets the value of the equinox_dynamical attribute, and
+returns the modified object. If called without an argument, it returns
+the current value of the equinox_dynamical attribute.
+
+Yes, it is equivalent to $coord->set (equinox_dynamical => $value) and
+$coord->get ('equinox_dynamical'). But there seems to be a significant
+performance penalty in the $self->SUPER::set () needed to get this
+attribute set from a subclass. It is possible that more methods like
+this will be added, but I do not plan to eliminate the set() interface.
+
+=cut
+
+sub equinox_dynamical {
+    if (@_ > 1) {
+	$_[0]{equinox_dynamical} = $_[1];
+	$_[0];
+    } else {
+	$_[0]{equinox_dynamical};
+    }
+}
+
 
 =item $coord = $coord->geocentric($psiprime, $lambda, $rho);
 
@@ -911,8 +925,6 @@ author's.
 
 This method returns the L</Geocentric latitude>, L</Longitude>, and
 distance to the center of the Earth.
-
-=for comment help syntax highlighting editor "
 
 =cut
 
@@ -976,8 +988,6 @@ $self;
 }
 
 
-=for comment help syntax highlighting editor "
-
 =item $coord = $coord->geodetic($psi, $lambda, $h, $ellipsoid);
 
 This method sets the L</Geodetic> coordinates represented by the object
@@ -1011,8 +1021,6 @@ Borkowski's "Accurate Algorithms to Transform Geocentric to Geodetic
 Coordinates", at F<http://www.astro.uni.torun.pl/~kb/Papers/geod/Geod-BG.htm>.
 This is best viewed with Internet Explorer because of its use of Microsoft's
 Symbol font.
-
-=for comment help syntax highlighting editor "
 
 =cut
 
@@ -1223,18 +1231,29 @@ See L</Attributes> for a list of the attributes you can get.
 
 =cut
 
-sub get {
-my $self = shift;
-ref $self or $self = \%static;
-my @rslt;
-foreach my $name (@_) {
-    exists $mutator{$name} or croak <<eod;
+{	# Begin local symbol block.
+
+    my %accessor = (
+    );
+
+    sub get {
+	my $self = shift;
+	ref $self or $self = \%static;
+	my @rslt;
+	foreach my $name (@_) {
+	    exists $mutator{$name} or croak <<eod;
 Error - Attribute '$name' does not exist.
 eod
-    push @rslt, $self->{$name};
+	    if ($accessor{$name}) {
+		push @rslt, $accessor{$name}->($self, $name);
+	    } else {
+		push @rslt, $self->{$name};
+	    }
+	}
+	return wantarray ? @rslt : $rslt[0];
     }
-return wantarray ? @rslt : $rslt[0];
-}
+
+}	# End local symbol block
 
 
 =item $coord = $coord->local_mean_time ($time);
@@ -1244,12 +1263,18 @@ local standard time,> but the universal time plus the longitude
 of the object expressed in seconds. Another definition is mean
 solar time plus 12 hours (since the solar day begins at noon).
 You will get an exception of some sort if the position of the
-object has not been set.
+object has not been set, or if the object represents inertial
+coordinates, or on any subclass whose position depends on the time.
 
 =item $time = $coord->local_mean_time ()
 
-This method returns the civil time of the object. It will raise
+This method returns the local mean time of the object. It will raise
 an exception if the time has not been set.
+
+Note that this returns the actual local time, not the GMT equivalent.
+This means that in formatting for output, you call
+
+ strftime $format, gmtime $coord->local_mean_time ();
 
 =cut
 
@@ -1298,7 +1323,26 @@ eod
 $self;
 }
 
+=item $time = $coord->local_time ();
 
+This method returns the local time (defined as solar time plus 12 hours)
+of the given object. There is no way to set the local time.
+
+This is really just a convenience routine - the calculation is simply
+the local mean time plus the equation of time at the given time.
+
+Note that this returns the actual local time, not the GMT equivalent.
+This means that in formatting for output, you call
+
+ strftime $format, gmtime $coord->local_time ();
+
+=cut
+
+sub local_time {
+    my $self = shift;
+    my $dyntim = $self->dynamical ();
+    $self->local_mean_time + equation_of_time ($dyntim);
+}
 
 =item $value = $coord->mean_angular_velocity();
 
@@ -1317,8 +1361,6 @@ return $self->can ('period') ?
 }
 
 
-=for comment help syntax-highlighting editor "
-
 =item ($time, $rise) = $coord->next_elevation ($body, $elev, $upper)
 
 This method calculates the next time the given body passes above or
@@ -1335,8 +1377,6 @@ body will be at its highest at meridian passage. It also assumes
 that if the body hasn't passed the given elevation in 183 days it
 never will. In this case it returns undef in scalar context, or
 an empty list in list context.
-
-=for comment help syntax-highlighting editor "
 
 =cut
 
@@ -1476,34 +1516,54 @@ wantarray ? ($end, $above) : $end;
 }
 
 
-=for comment help syntax-highlighting editor "
-
 =item $coord = $coord->precess ($time);
 
-This method precesses the equatorial coordinates of the object to the
-given universal time. The starting time is assumed to be the time
-setting of the object when the call is made. The equatorial coordinates
-of the object are set to the results of the calculation, and the
-universal time of the object is set to the value of the $time argument.
-The object itself is returned.
-
-B<NOTE> that side effects of setting the time (i.e. in subclasses which
-define the time_set() method) B<will> take place as a result of calling
-this method.
-
-The algorithm comes from Jean Meeus, "Astronomical Algorithms", 2nd
-Edition, Chapter 21, pages 134ff (a.k.a. "the rigorous method").
-
-=for comment help syntax-highlighting editor "
+This method is a convenience wrapper for precess_dynamical(). The
+functionality is the same except that B<the time is specified in
+universal time.>
 
 =cut
 
 sub precess {
-my $self = shift;
-my $time = shift;
+    my $self = shift;
+    if (@_ && $_[0]) {
+	$_[0] += dynamical_delta ($_[0]);
+    }
+    $self->precess_dynamical (@_);
+}
 
-my $start = $self->dynamical;
-my $end = $time + dynamical_delta ($time);
+
+=item $coord = $coord->precess_dynamical ($time);
+
+This method precesses the coordinates of the object to the given
+equinox, B<specified in dynamical time.> The starting equinox is the
+value of the 'equinox_dynamical' attribute, or the current time setting
+if the 'equinox_dynamical' attribute is any false value (i.e. undef, 0,
+or ''). A warning will be issued if the value of 'equinox_dynamical' is
+undef (which is the default setting) and the object represents inertial
+coordinates. As of version 0.013_02, B<the time setting of the object is
+unaffected by this operation.>
+
+As a side effect, the value of the 'equinox_dynamical' attribute will be
+set to the dynamical time corresponding to the argument.
+
+The object itself is returned.
+
+The algorithm comes from Jean Meeus, "Astronomical Algorithms", 2nd
+Edition, Chapter 21, pages 134ff (a.k.a. "the rigorous method").
+
+=cut
+
+sub precess_dynamical {
+my $self = shift;
+
+my $end = shift
+    or croak "No equinox time specified";
+
+defined (my $start = $self->get ('equinox_dynamical'))
+    or !$self->get ('inertial')
+    or carp "Warning - Precess called with equinox_dynamical attribute undefined";
+$start ||= $self->dynamical ();
 
 my ($alpha0, $delta0, $rho0) = $self->equatorial ();
 
@@ -1533,8 +1593,8 @@ my $C = $sintheta * $cosdelta0cosalpha0 + $costheta * $sindelta0;
 my $alpha = atan2 ($A , $B) + $z;
 my $delta = asin ($C);
 
-$self->equatorial ($alpha, $delta, $rho0, $time);
-$self->{dynamical} = $end;
+$self->equatorial ($alpha, $delta, $rho0);
+$self->set (equinox_dynamical => $end);
 $self;
 }
 
@@ -1754,6 +1814,9 @@ $self;
     debug => \&_set_value,
     diameter => \&_set_value,
     ellipsoid => \&_set_reference_ellipsoid,
+    equinox_dynamical => \&_set_value,	# CAVEAT: _convert_eci_to_ecef
+					# accesses this directly for
+					# speed.
     flattening => \&_set_custom_ellipsoid,
     horizon => \&_set_value,
     id => \&_set_id,
@@ -1807,7 +1870,6 @@ $_[0]->{$_[1]} = $_[2];
 SET_ACTION_NONE;
 }
 
-
 =item $coord->universal ($time)
 
 This method sets the time represented by the object, in universal time
@@ -1823,48 +1885,41 @@ This method returns the universal time previously set.
 =cut
 
 sub universal {
-my $self = shift;
-unless (@_) {
-    ref $self or croak <<eod;
+    my $self = shift;
+    unless (@_) {
+	ref $self or croak <<eod;
 Error - The universal() method may not be called as a class method
         unless you specify arguments.
 eod
-    return $self->{universal} || croak <<eod;
+	return $self->{universal} || croak <<eod;
 Error - Object's time has not been set.
 eod
-# help syntax-highlighting editor '
     }
 
-if (@_ == 1) {
-    $self = $self->new () unless ref $self;
-    return $self if defined $self->{universal} &&
-	$_[0] == $self->{universal};
-    delete $self->{local_mean_time};
-    delete $self->{dynamical};
-    $self->{universal} = shift;
-    if ($self->{specified}) {
-	if ($self->{inertial}) {
-##	    $self->{_need_purge} = 1;
-	    delete $self->{_ECI_cache}{fixed};
-	    }
-	  else {
-	    delete $self->{_ECI_cache}{inertial};
+    if (@_ == 1) {
+	$self = $self->new () unless ref $self;
+	return $self if defined $self->{universal} &&
+	    $_[0] == $self->{universal};
+	delete $self->{local_mean_time};
+	delete $self->{dynamical};
+	$self->{universal} = shift;
+	if ($self->{specified}) {
+	    if ($self->{inertial}) {
+		delete $self->{_ECI_cache}{fixed};
+	    } else {
+		delete $self->{_ECI_cache}{inertial};
 	    }
 	}
-    $self->can ('time_set') && !$self->{_no_set} and do {
-	$self->{_no_set} = 1;
-	$self->time_set ();
-	delete $self->{_no_set};
-	};
-    }
-  else {
-    croak <<eod;
+	$self->_call_time_set ();	# Run the model if any
+
+    } else {
+	croak <<eod;
 Error - The universal() method must be called with either zero
         arguments (to retrieve the time) or one argument (to set the
         time).
 eod
     }
-$self;
+    $self;
 }
 
 
@@ -1873,6 +1928,20 @@ $self;
 #	Internal
 #
 
+#	$coord->_call_time_set ()
+
+#	This method calls the time_set method if it exists and if we are
+#	not already in it. It is a way to avoid endless recursion if the
+#	time_set method should happen to set the time.
+
+sub _call_time_set {
+    my $self = shift;
+    $self->can ('time_set') or return;
+    unless ($self->{_no_set}++) {
+	$self->time_set ();
+    }
+    --$self->{_no_set} or delete $self->{_no_set};
+}
 
 #	$coord->_check_coord (method => \@_)
 
@@ -1963,15 +2032,27 @@ Debug eci - after rotation,
 eod
 $data[3] += $data[1] * $self->{angularvelocity};
 $data[4] -= $data[0] * $self->{angularvelocity};
-return @{$self->{_ECI_cache}{inertial}{eci} = [@data]};
+$self->set (equinox_dynamical => $self->dynamical);
+return @{$self->{_ECI_cache}{inertial}{eci} = \@data};
 }
 
 #	This subroutine converts the object's ECI setting to ECEF, and
 #	both caches and returns the result.
 
+our $EQUINOX_TOLERANCE = 365 * SECSPERDAY;
+
 sub _convert_eci_to_ecef {
 my $self = shift;
 my $thetag = thetag ($self->universal);
+
+my $dyn = $self->dynamical;
+## my $equi = $self->get ('equinox_dynamical') || do {
+##     $self->set (equinox_dynamical => $dyn); $dyn};
+my $equi = $self->{equinox_dynamical} ||= $dyn;
+if (abs ($equi - $dyn) > $EQUINOX_TOLERANCE) {
+    $self->precess_dynamical ($dyn);
+}
+
 my @ecef = $self->eci ();
 $ecef[3] -= $ecef[1] * $self->{angularvelocity};
 $ecef[4] += $ecef[0] * $self->{angularvelocity};
@@ -1981,7 +2062,8 @@ my $sinth = sin (- $thetag);
 	$ecef[0] * $sinth + $ecef[1] * $costh);
 @ecef[3, 4] = ($ecef[3] * $costh - $ecef[4] * $sinth,
 	$ecef[3] * $sinth + $ecef[4] * $costh);
-return @{$self->{_ECI_cache}{fixed}{ecef} = [@ecef]};
+$self->{_ECI_cache}{fixed}{ecef} = \@ecef;
+return @ecef;
 }
 
 #	$value = _local_mean_delta ($coord)
@@ -2035,11 +2117,11 @@ This class has the following attributes:
 
 =item angularvelocity (radians per second)
 
-This attribute represents the angular velocity of the Earth' surface in
-radians per second. The initial value is 7.292114992e-5, which
-according to Jean Meeus is the value for 1996.5. He cites the
-International Earth Rotation Service's Annual Report for 1996
-(Published at the Observatoire de Paris, 1997).
+This attribute represents the angular velocity of the Earth's surface in
+radians per second. The initial value is 7.292114992e-5, which according
+to Jean Meeus is the value for 1996.5. He cites the International Earth
+Rotation Service's Annual Report for 1996 (Published at the Observatoire
+de Paris, 1997).
 
 Subclasses may place appropriate values here, or provide a period()
 method.
@@ -2073,6 +2155,27 @@ the known_ellipsoid() method for the initially-valid names, and how
 to add more.
 
 The default is 'WGS84'.
+
+=item equinox_dynamical (numeric, dynamical time)
+
+This attribute represents the time of the L</Equinox> to which the
+coordinate data are referred. Models implemented by subclasses should
+set this to the L</Equinox> to which the model is referred. When setting
+positions directly the user should also set the desired
+equinox_dynamical if conversion between inertial and Earth-fixed
+coordinates is of interest. If this is not set, these conversions will
+use the current time setting of the object as the L</Equinox>.
+
+In addition, if you have a position specified in earth-fixed coordinates
+and convert it to inertial coordinates, this attribute will be set to
+the dynamical time of the object.
+
+Unlike most times in this package, B<this attribute is specified in
+dynamical time.> If your equinox is universal time $uni, set this
+attribute to $uni + dynamical_delta ($uni). The dynamical_delta
+subroutine is found in Astro::Coord::ECI::Utils.
+
+The default is undef.
 
 =item flattening (numeric)
 
@@ -2187,6 +2290,33 @@ declination is negative.
 
 Declination input to and output from this module is in radians.
 
+=head2 Dynamical time
+
+A dynamical time is defined theoretically by the motion of astronomical
+bodies. In practice, it is seen to be related to Atomic Time (a.k.a.
+TAI) by a constant.
+
+There are actually two dynamical times of interest: TT (Terrestrial
+Time, a.k.a.  TDT for Terrestrial Dynamical Time), which is defined in
+terms of the geocentric ephemerides of solar system bodies, and TDB
+(Barycentric Dynamical Time), which is defined in terms of the
+barycentre (a.k.a "center of mass") of the solar system. The two differ
+by the relativistic effects of the motions of the bodies in the Solar
+system, and are generally less than 2 milliseconds different. So unless
+you are doing high-precision work they can be considered identical, as
+Jean Meeus does in "Astronomical Algorithms".
+
+For practical purposes, TT = TAI + 32.184 seconds. If I ever get the
+gumption to do a re-implementation (or alternate implementation) of time
+in terms of the DateTime object, this will be the definition of
+dynamical time. Until then, though, formula 10.2 on page 78 of Jean
+Meeus' "Astronomical Algorithms" second edition, Chapter 10 (Dynamical
+Time and Universal Time) is used.
+
+Compare and contrast this to L</Universal time>. This explanation leans
+heavily on L<http://star-www.rl.ac.uk/star/docs/sun67.htx/node226.html>,
+which contains a more fulsome but eminently readable explanation.
+
 =head2 Earth-Centered, Earth-fixed (ECEF) coordinates
 
 This is a Cartesian coodinate system whose origin is the center of the
@@ -2207,7 +2337,8 @@ the position of orbiting bodies. The X axis passes through 0 hours
 L</Right Ascension> and 0 degrees L</Declination>. The Y axis passes
 through 6 hours L</Right Ascension> and 0 degrees L</Declination>. The
 Z axis passes through +90 degrees L</Declination> (a.k.a. the North
-Pole).
+Pole). By implication, these coordinates are referred to a given
+L</Equinox>.
 
 All three axes are input to and output from this module in kilometers.
 
@@ -2216,7 +2347,8 @@ All three axes are input to and output from this module in kilometers.
 The Ecliptic is the plane of the Earth's orbit, projected onto the sky.
 Ecliptic coordinates are a spherical coordinate system referred to
 the ecliptic and expressed in terms of L</Ecliptic latitude> and
-L</Ecliptic longitude>.
+L</Ecliptic longitude>. By implication, Ecliptic coordinates are also
+referred to a specific L</Equinox>.
 
 =head3 Ecliptic latitude
 
@@ -2229,7 +2361,7 @@ Ecliptic latitude is input to and output from this module in radians.
 
 Ecliptic longitude is the angular distance of a point east of the point
 where the plane of the Earth's orbit intersects the plane of the
-equator. This point is also known as the vernal equinox and the
+equator. This point is also known as the vernal L</Equinox> and the
 first point of Ares.
 
 Ecliptic longitude is input to and output from this module in radians.
@@ -2249,7 +2381,19 @@ L</Altitude> for something different.
 
 Equatorial coordinates are a spherical coordinate system referred to
 the plane of the equator projected onto the sky. Equatorial coordinates
-are specified in L</Right Ascension> and L</Declination>.
+are specified in L</Right Ascension> and L</Declination>, and implicitly
+referred to a given L</Equinox>
+
+=head2 Equinox
+
+The L</Ecliptic>, L</Equatorial>, and L</Earth-Centered Inertial (ECI)
+coordinates> are defined in terms of the location of the intersection of
+the celestial equator with the L</Ecliptic>. The actual location of this
+point changes in time due to precession of the Earth's axis, so each of
+these coordinate systems is implicitly qualified by ("referred to"
+appears to be the usual terminology) the relevant time. By a process of
+association of ideas, this time is referred to as the equinox of the
+data.
 
 =head2 Geocentric
 
@@ -2333,6 +2477,37 @@ In astronomical literature it is usual to report right ascension
 in hours, minutes, and seconds, with 60 seconds in a minute, 60
 minutes in an hour, and 24 hours in a circle.
 
+=head2 Universal time
+
+This term can refer to a number of scales, but the two of interest are
+UTC (Coordinated Universal Time) and UT1 (Universal Time 1, I presume).
+The latter is in effect mean solar time at Greenwich, though its
+technical definition differs in detail from GMT (Greenwich Mean Time).
+The former is a clock-based time, whose second is the SI second (defined
+in terms of atomic clocks), but which is kept within 0.9 seconds of UT1
+by the introduction of leap seconds. These are introduced (typically at
+midyear or year end) by prior agreement among the various timekeeping
+bodies based on observation; there is no formula for computing when a
+leap second will be needed, because of irregularities in the Earth's
+rotation.
+
+Jean Meeus' "Astronomical Algorithms", second edition, deals with the
+relationship between Universal time and L</Dynamical time> in Chapter 10
+(pages 77ff). His definition of "Universal time" seems to refer to UT1,
+though he does not use the term.
+
+This software considers Universal time to be equivalent to Perl time.
+Since we are interested in durations (time since a given epoch, to be
+specific), this is technically wrong in most cases, since leap seconds
+are not taken into account. But in the case of the bodies modeled by
+the Astro::Coord::ECI::TLE object, the epoch is very recent (within a
+week or so), so the error introduced is small. It is larger for
+astronomical calculations, where the epoch is typically J2000.0, but the
+angular motions involved are smaller, so it all evens out. I hope.
+
+Compare and contrast L</Dynamical time>. This explanation leans heavily
+on L<http://star-www.rl.ac.uk/star/docs/sun67.htx/node224.html>.
+
 =head2 XYZ coordinates
 
 See L</Earth-Centered, Earth-fixed (ECEF) coordinates>.
@@ -2406,6 +2581,8 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 Copyright 2005, 2006, 2007 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
+
+=head1 LICENSE
 
 This module is free software; you can use it, redistribute it and/or
 modify it under the same terms as Perl itself. Please see

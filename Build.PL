@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+use 5.006;
 
 use strict;
 use warnings;
@@ -7,7 +7,7 @@ use Module::Build;
 use Config;
 use FileHandle;
 
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 my $bldr = Module::Build->new (
 	dist_author => 'Tom Wyant (wyant at cpan dot org)',
