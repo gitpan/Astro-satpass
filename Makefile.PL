@@ -8,7 +8,7 @@ use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
 use Getopt::Std;
 
-our $VERSION = '0.007';
+our $VERSION = '0.008';
 
 my %opt;
 getopts ('ny', \%opt) or die <<eod;
@@ -20,13 +20,7 @@ eod
 
 my @exe_files;
 my @clean_files;
-my @prereq = (
-    );
-
-eval {
-    require t::Ctags;		# Make 'make' generate tags file.
-    push @clean_files, 'tags';	# Clean it up.
-};
+my @prereq = ();
 
 print <<eod;
 
@@ -35,11 +29,11 @@ The following executable can be installed:
   satpass is a scriptable program to predict satellite passes
     over a given observer.
 
-If you do not want this, run Makefile.PL with the -n option.
+If you do not want this, run Makefile.PL with the -n option. If you want
+to install without being asked, run Makefile.PL with the -y option.
 
-Unless you are running MSWin32 or VMS (which are special-cased),
-I will assume you are running some version of U*ix, and behave
-accordingly.
+Unless you are running MSWin32 or VMS (which are special-cased), I will
+assume you are running some version of U*ix, and behave accordingly.
 
 eod
 
@@ -54,14 +48,10 @@ if ($opt{n}) {
   else {
     foreach (@possible_exes) {
 	push @exe_files, $_
-##	    if prompt ("Do you want to install $_?", 'n') =~ m/^y/i
+	    if prompt ("Do you want to install $_?", 'n') =~ m/^y/i
 	    ;
 	}
     }
-
-=for comment keep parentheses-matching editor (that does not understand POD) happy: [
-
-=cut
 
 my $stringmod = $] >= 5.008 ? '' : 'IO::String';
 
@@ -97,21 +87,8 @@ eod
 	next unless $module;
 	my @mv = $version ? ($module, $version) : ($module);
 	eval "use @mv";
-##	$@ or do {push @prereq, $module, $version; next};
 	$@ or next;
 	print "\n", $info, "\n";
-##	if ($opt{n}) {
-##	    print "Because you have asserted -n, optional module @mv will not be installed.\n\n";
-##	    }
-##	  elsif ($opt{y}) {
-##	    print "Because you have asserted -y, optional module @mv will be installed.\n\n";
-##	    push @prereq, $module, $version;
-##	    }
-##	  else {
-##	    push @prereq, $module, $version
-##		if prompt ("Do you want to install optional module @mv?", 'n')
-##			=~ m/^y/i;
-##	    }
 	}
     if ($^O eq 'MSWin32') {
 	@exe_files = map {"bin/$_"} @exe_files;
@@ -143,6 +120,7 @@ eod
 ##my $vers = $] >= 5.008 ? '-5.8' : '';
 my $vers = '';
 
+(my $mmv = ExtUtils::MakeMaker->VERSION) =~ s/_//g;
 WriteMakefile (
 	NAME => 'Astro::Coord::ECI',
 	DISTNAME => 'Astro-satpass',
@@ -159,7 +137,7 @@ WriteMakefile (
 		AUTHOR => 'Tom Wyant (wyant at cpan dot org)',
 		ABSTRACT => 'Classes and app to compute satellite visibility',
 		BINARY_LOCATION => "$Config{archname}$vers/Astro-satpass.tar.gz",
-		(ExtUtils::MakeMaker->VERSION >= 6.31 ?
+		($mmv >= 6.31 ?
 		    (LICENSE => 'perl') : ())
 		) : (),
 	);
