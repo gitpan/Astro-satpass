@@ -106,7 +106,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.012';
+our $VERSION = '0.013';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -1255,6 +1255,39 @@ $tle;
 }
 
 
+=item $kilometers = $tle->semimajor();
+
+This method calculates the semimajor axis of the orbit, using Kepler's
+Third Law (Isaac Newton's version) in the form
+
+ T ** 2 / a ** 3 = 4 * pi ** 2 / mu
+
+where
+
+ T is the orbital period,
+ a is the semimajor axis of the orbit,
+ pi is the circle ratio (3.14159 ...), and
+ mu is the Earth's gravitational constant,
+    3.986005e5 km ** 3 / sec ** 2
+
+
+The calculation is carried out using the period implied by the current
+model.
+
+=cut
+
+{
+    my $mu = 3.986005e5;	# km ** 3 / sec ** 2 -- for Earth.
+    sub semimajor {
+	my $self = shift;
+	$self->{&TLE_INIT}{TLE_semimajor} ||= do {
+	    my $to2pi = $self->period / SGP_TWOPI;
+	    exp (log ($to2pi * $to2pi * $mu) / 3);
+	};
+    }
+}
+
+
 =item $tle->set (attribute => value ...)
 
 This method sets the values of the various attributes. The changing of
@@ -1397,6 +1430,14 @@ eod
     sort {$a->[0] <=> $b->[0]}
         map {[$_->{id}, $_->{type}, $_->{status}, $_->{name},
 	$_->{comment}]} values %status;
+    }
+  elsif ($cmd eq 'yaml') {	# <<<< Undocumented!!!
+    my $class = eval {require YAML::Syck; 'YAML::Syck'} ||
+    eval {require YAML; 'YAML'}
+	or croak "Neither YAML nor YAML::Syck available";
+    my $dumper = $class->can('Dump')
+	or croak "$class does not implement Dump()";
+    print $dumper->(\%status);
     }
   else {
     croak <<eod;
@@ -5922,7 +5963,7 @@ eod
 
 #	Initialization
 
-%status = (	# As of 21-Feb-2007, from Kelso's document dated 19-Feb-2007
+%status = (	# As of 30-Sep-2008, from Kelso's document dated 29-Sep-2008
           '25432' => {
                        'comment' => '',
                        'status' => 0,
@@ -5949,7 +5990,7 @@ eod
                      },
           '24948' => {
                        'comment' => '',
-                       'status' => 0,
+                       'status' => 2,
                        'name' => 'Iridium 28',
                        'class' => 'Astro::Coord::ECI::TLE::Iridium',
                        'type' => 'iridium',
@@ -6421,7 +6462,7 @@ eod
                      },
           '27375' => {
                        'comment' => '',
-                       'status' => 1,
+                       'status' => 0,
                        'name' => 'Iridium 95',
                        'class' => 'Astro::Coord::ECI::TLE::Iridium',
                        'type' => 'iridium',
@@ -6658,7 +6699,7 @@ eod
                        'class' => 'Astro::Coord::ECI::TLE::Iridium',
                        'type' => 'iridium',
                        'id' => 25346
-                     },
+                     }
 	);
 
 1;
@@ -6965,7 +7006,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT
 
-Copyright 2005, 2006, 2007 by Thomas R. Wyant, III
+Copyright 2005, 2006, 2007, 2008 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
 
 =head1 LICENSE
