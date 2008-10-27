@@ -4,13 +4,23 @@ Astro::Coord::ECI::Sun - Compute the position of the Sun.
 
 =head1 SYNOPSIS
 
+ use Astro::Coord::ECI;
+ use Astro::Coord::ECI::Sun;
+ use Astro::Coord::ECI::Utils qw{deg2rad};
+ 
+ # 1600 Pennsylvania Ave, Washington DC USA
+ # latitude 38.899 N, longitude 77.038 W,
+ # altitude 16.68 meters above sea level
+ my $lat = deg2rad (38.899);    # Radians
+ my $long = deg2rad (-77.038);  # Radians
+ my $alt = 16.68 / 1000;        # Kilometers
  my $sun = Astro::Coord::ECI::Sun->new ();
  my $sta = Astro::Coord::ECI->
      universal (time ())->
      geodetic ($lat, $long, $alt);
  my ($time, $rise) = $sta->next_elevation ($sun);
  print "Sun @{[$rise ? 'rise' : 'set']} is ",
-     scalar localtime $time;
+     scalar localtime $time, "\n";
 
 =head1 DESCRIPTION
 
@@ -34,7 +44,7 @@ use warnings;
 
 package Astro::Coord::ECI::Sun;
 
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 
 use base qw{Astro::Coord::ECI};
 
@@ -435,7 +445,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT
 
-Copyright 2005, 2006, 2007 by Thomas R. Wyant, III
+Copyright 2005, 2006, 2007, 2008 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
 
 =head1 LICENSE

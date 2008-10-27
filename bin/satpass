@@ -42,7 +42,7 @@ my $xml_parser;
 #	Initialization
 #
 
-our $VERSION = '0.018';
+our $VERSION = '0.019';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -836,6 +836,7 @@ foreach my $tle (_select_observing_list ($pass_start)) {
     $tle->set (
 	algorithm => $cmdopt{algorithm} || 'fixed',
 	backdate => $parm{backdate},
+	debug => $cmdopt{debug},
 	horizon => $horizon,
 	twilight => $twilight,
 	model => $model,
@@ -1794,6 +1795,7 @@ my $indent;
 while ($time <= $endtm) {
     print strftime ($dtfmt, localtime $time), "\n";
     foreach my $body (_select_observing_list ($time), @sky) {
+	$body->set(debug => $cmdopt{debug});
 	$body->universal ($time);
 	my $name = $body->get ('name') || $body->get ('id') || 'body';
 	if ($body->represents ('Astro::Coord::ECI::TLE')) {
@@ -5726,11 +5728,12 @@ which reports the name of the file actually used to initialize.
 =head1 CHANGES
 
 The following changes have been introduced into this script since
-version 0.013:
+version 0.017:
 
-- Add the echo and times commands.
-
-- Add the backdate and desired_equinox_dynamical parameters.
+Fixed the USGS elevation query for the fact that they now generate
+correct XML (which SOAP::Lite now parses for us), and the fact that they
+have changed the SOAP URI and proxy to
+http://gisdata.usgs.gov/XMLWebServices2/.
 
 For prior changes, see F<Changes>.
 
