@@ -21,13 +21,13 @@ use Date::Manip;
 use File::Basename;
 use FileHandle;
 use Getopt::Long;
+use Params::Util 0.25 qw{_INSTANCE};
 use Pod::Usage;
 use POSIX qw{floor strftime};
 use Term::ReadLine;
 use Text::Abbrev;
 use Text::ParseWords;
-use Time::Local;
-use UNIVERSAL qw{can};
+use Time::y2038;
 
 my (
 	$clipboard_unavailable,
@@ -42,7 +42,7 @@ my $xml_parser;
 #	Initialization
 #
 
-our $VERSION = '0.019';
+our $VERSION = '0.020';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -187,7 +187,8 @@ sub _time ();		# Predeclare, since I intend to redefine.
 my $date_manip_fudge = 
     $^O eq 'MacOS' ? timegm (0, 0, 0, 1, 0, 1970) : 0;
 
-my $rl = Term::ReadLine->new ('Predict satellite passes') if -t STDIN;
+my $rl;
+$rl = Term::ReadLine->new ('Predict satellite passes') if -t STDIN;
 my $fh = *STDIN;
 my @frame;
 my %alias = (
@@ -279,7 +280,8 @@ satpass $VERSION - Satellite pass predictor
 based on Astro::Coord::ECI @{[Astro::Coord::ECI->VERSION]}
 Perl $Config{version} on $Config{osname}
 
-Copyright 2005, 2006, 2007 by Thomas R. Wyant, III. All rights reserved.
+Copyright 2005, 2006, 2007, 2008, 2009 by Thomas R. Wyant, III.
+All rights reserved.
 
 Enter 'help' for help. See the help for terms of use.
 
@@ -498,7 +500,7 @@ eod
 #	call it, fielding any exceptions thrown and turning them into
 #	warnings.
 
-      elsif (can (__PACKAGE__, $verb)) {
+      elsif (__PACKAGE__->can($verb)) {
 	_parse_time_reset ();	# Reset relative time base to last explicit
 	no strict qw{refs};
 	$SIG{INT} = sub {die "\nInterrupted by user.\n"};
@@ -578,7 +580,8 @@ $almanac_start >= $almanac_end and die <<eod;
 Error - End time must be after start time.
 eod
 
-my $all = 1 unless grep{$cmdopt{$_}} qw{horizon transit twilight quarter};
+my $all;
+$all = 1 unless grep{$cmdopt{$_}} qw{horizon transit twilight quarter};
 
 #	Build an object representing our ground location.
 
@@ -645,7 +648,8 @@ foreach (sort {$a->[0] <=> $b->[0]} @almanac) {
 #
 
 sub cd {
-my $expand = _tilde_expand ($_[0]) if $_[0];
+my $expand;
+$expand = _tilde_expand ($_[0]) if $_[0];
 $expand ? chdir ($expand) || die <<eod : chdir () || die <<eod;
 Error - Can not cd to $expand
         $!
@@ -1168,7 +1172,8 @@ $cmdlgl{height_vi} = $cmdlgl{height};
 #	Here is the height() subroutine itself.
 
 sub height {
-my $cc = pop @_ if @_ % 2;
+my $cc;
+@_ % 2 and $cc = pop @_;
 $cc ||= $parm{country};
 $cc = lc $cc;
 my $handler = "height_$cc";
@@ -1207,169 +1212,39 @@ goto \&height_us;
 #	The USGS has data for locations other than the USA, so other
 #	countries will be handled here as well.
 
-my $yaml_loader;	# For debugging only.
 sub height_us {
-_load_module ('SOAP::Lite', 'height_us');
+    _load_module ('Geo::WebService::Elevation::USGS', 'height_us');
 
-my $set_pos = @_;
-my $lat = @_ ? shift @_ : $parm{latitude};
-my $lon = @_ ? shift @_ : $parm{longitude};
+    my $set_pos = @_;
+    my $lat = @_ ? shift @_ : $parm{latitude};
+    my $lon = @_ ? shift @_ : $parm{longitude};
 
-$cmdopt{source_layer} ||= -1;
-$cmdopt{retry_on_zero} ||= 0;
-$cmdopt{debug} and warn <<eod;
-Debug - Getting elevation for latitude $lat, longitude $lon
-        -source_layer $cmdopt{source_layer}
-	-retry_on_zero $cmdopt{retry_on_zero}
-eod
+    $cmdopt{source_layer} ||= -1;
+    $cmdopt{retry_on_zero} ||= 0;
 
-#	Manufacture a SOAP::Lite object appropriate to the installed
-#	version of SOAP::Lite.
-
-$cmdopt{debug} and SOAP::Trace->import ('all');
-my $soap = _soapdish ('http://gisdata.usgs.gov/XMLWebServices2/',
-####    'http://gisdata.usgs.gov/XMLWebServices/TNM_Elevation_Service.asmx');
-    'http://gisdata.usgs.gov/xmlwebservices2/elevation_service.asmx');
-
-#	Query the USGS for the data. This is not straightforward
-#	because they're using .NET.
-
-my $rslt;
-##my $xmlns = 'http://gisdata.usgs.net/XMLWebServices/';
-my $xmlns = 'http://gisdata.usgs.gov/XMLWebServices2/';
-
-my $tries = ($cmdopt{retry_on_zero} || 0) + 1;
-
-while (--$tries >= 0) {
-
-#	The -yaml option is purely for debugging purposes, and will
-#	remain undocumented.
-
-    if ($cmdopt{yaml}) {
-	$yaml_loader ||= eval {
-	    require YAML::Syck; \&YAML::Syck::LoadFile;} || eval {
-	    require YAML; \&YAML::LoadFile; }
-	    or die "Can not load YAML::Syck or YAML.\n";
-	$rslt = $yaml_loader->($cmdopt{yaml});
-    } elsif ($cmdopt{all}) {
-	$rslt = $soap->call (SOAP::Data->name ('getAllElevations')->attr (
-		{xmlns => $xmlns}) =>
-	    SOAP::Data->new (name => 'X_Value', type => 'string',
-		value => $lon),
-	    SOAP::Data->new (name => 'Y_Value', type => 'string',
-		value => $lat),
-	    SOAP::Data->new (name => 'Elevation_Units', type => 'string',
-		value => 'METERS'),
-	    )->result;
-	}
-      else {
-	$rslt = $soap->call (SOAP::Data->name ('getElevation')->attr (
-		{xmlns => $xmlns}) =>
-	    SOAP::Data->new (name => 'X_Value', type => 'string',
-		value => $lon),
-	    SOAP::Data->new (name => 'Y_Value', type => 'string',
-		value => $lat),
-	    SOAP::Data->new (name => 'Source_Layer', type => 'string', 
-		value => $cmdopt{source_layer} || -1),
-	    SOAP::Data->new (name => 'Elevation_Units', type => 'string',
-		value => 'METERS'),
-	    SOAP::Data->new (name => 'Elevation_Only', type => 'string',
-		value => 'false'),
-	    )->result;
-	}
-
-#	Parse our result. If we got a hash back, it means that the USGS
-#	got their XML correct and SOAP::Lite parsed it for us. But in
-#	the past their XML was missing end tags, so SOAP::Lite passed us
-#	a string which we had to correct by supplying the missing end
-#	tags before parsing the XML ourselves.
-
-    if (ref $rslt eq 'HASH') {
-	if ($cmdopt{debug}) {
-	    local $Data::Dumper::Terse = 1;
-	    print 'Result: ', Dumper($rslt);
-	}
-	foreach my $key (
-	    qw{USGS_Elevation_Web_Service_Query Elevation_Query Elevation}) {
-	    $rslt = $rslt->{$key}
-		or die "Error - Elevation result is missing tag <$key>\n";
-	}
-	if (ref $rslt eq 'ARRAY') {
-	    my $foo = $rslt;
-	    $rslt = undef;
-	    foreach my $val (@$foo) {
-		looks_like_number($val) or next;
-		($val += 0) < -1e100 and next;
-		$rslt = $val and last;
-	    }
-	} else {
-	    looks_like_number($rslt) or $rslt = undef;
-	}
-    } elsif ($rslt) {
-
-	$cmdopt{debug} and print 'Result: ', $rslt, "\n";
-
-	my @endtag;
-	while ($rslt =~ m/(<\w+.*?>)/g) {
-	    my $begintag = $1;
-	    (my $endtag = $begintag) =~ s|<|</|;
-	    $endtag =~ s/\s+.*/>/;
-	    last if $rslt =~ m/$endtag/i;
-	    unshift @endtag, $endtag;
-	    }
-	if (my $endtag = join '', @endtag) {
-	    $cmdopt{debug} and
-		warn "Warning - Supplying missing end tag $endtag\n";
-	    $rslt .= $endtag;
-	    }
-	$cmdopt{debug} and print 'Parsing: ', $rslt, "\n";
-	my @data = _parse_xml ($rslt, 'height_us');
-	@data and do {
-	    @data = @{_find_first_tag (\@data, qw{
-		USGS_Elevation_Web_Service_Query
-		Elevation_Query})};
-	    $rslt = 0;
-	    foreach (@data) {
-		next unless ref $_ eq 'ARRAY';
-		next unless $_->[0] eq 'Elevation';
-		next unless looks_like_number ($_->[2]);
-		next if $_->[2] < -1e100;
-		$rslt = $_->[2];
-		last;
-	    }
-	    last unless $rslt == 0;
+    my $eq = Geo::WebService::Elevation::USGS->new (
+	source => $cmdopt{source_layer},
+	trace => $cmdopt{debug},
+	units => 'METERS',
+    );
+    my $tries = ($cmdopt{retry_on_zero} || 0) + 1;
+    my $rslt;
+    while (--$tries >= 0) {
+	($rslt) = $eq->elevation($lat, $lon);
+	$eq->is_valid($rslt) or do {
+	    $tries > 0 and next;
+	    die "No valid result found.\n";
 	};
-	sleep 2 if $tries;
-    } else {
-	$cmdopt{debug} and print "No result from http://gisdata.usgs.gov/\n";
-	$rslt = undef;
-	last;
-	}
-
+	$rslt->{Elevation} != 0 and last;
     }
 
-undef $soap;
-$cmdopt{debug} and SOAP::Trace->import ('-all');
-
-#	If, after all the above shenannigans, we have a result, set
-#	the height (and latitude and longitude if not defaulted), and
-#	display whatever we set. The USGS returns a ridiculous
-#	precision, so we round to the nearest centimeter.
-
-if (defined $rslt) {
     if ($set_pos) {
 	$parm{latitude} = $lat;
 	$parm{longitude} = $lon;
 	show (qw{latitude longitude});
 	}
-    $parm{height} = sprintf '%.2f', $rslt;
+    $parm{height} = sprintf '%.2f', $rslt->{Elevation};
     show (qw{height});
-    }
-  else {
-    print <<eod;
-No height found for latitude $parm{latitude} longitude $parm{longitude}
-eod
-    }
 
 }
 
@@ -1746,7 +1621,7 @@ foreach my $body (@sky) {
     $phase = rad2deg ($phase);
     my $name;
     foreach (@table) {$_->[0] > $phase or next; $name = $_->[1]; last}
-    printf "%s @{[$body->get ('name')]} phase %d deg, %s, %i%% illum.\n",
+    printf "%s @{[$body->get ('name')]} phase %.0f deg, %s, %.0f%% illum.\n",
 	strftime ($dtfmt, localtime $time), $phase, $name, $illum * 100;
     }
 }
@@ -2089,7 +1964,7 @@ my $verb = lc (shift @_ || '');
 
 if (!$verb) {
     foreach my $body (@sky) {
-	if ($body->isa ('Astro::Coord::ECI::Star')) {
+	if (_INSTANCE($body, 'Astro::Coord::ECI::Star')) {
 	    my ($ra, $dec, $rng, $pmra, $pmdec, $vr)  = $body->position ();
 	    $rng /= PARSEC;
 	    $pmra = rad2deg ($pmra / 24 * 360 * cos ($ra)) * SPY2DPS;
@@ -2120,7 +1995,7 @@ eod
     my $class = 'Astro::Coord::ECI::' .
 	($special ? ucfirst ($lcn) : 'Star');
     foreach my $body (@sky) {
-	return if $body->isa ($class) &&
+	return if _INSTANCE($body, $class) &&
 		($special || $lcn eq lc $body->get ('name'));
 	}
     my $body = $class->new (debug => $parm{debug});
@@ -2174,7 +2049,7 @@ eod
     my $name = $_[0];
     my $lcn = lc $_[0];
     foreach my $body (@sky) {
-	next unless $body->isa ('Astro::Coord::ECI::Star') &&
+	next unless _INSTANCE($body, 'Astro::Coord::ECI::Star') &&
 		$lcn eq lc $body->get ('name');
 	die <<eod;
 Error - The sky already contains $_[0]. If you want to
@@ -2385,31 +2260,17 @@ sub times {
     my $time = _parse_time (shift || '+0');
     my $dtfmt = "$parm{date_format} $parm{time_format}";
     my $sta = _get_station ()->universal ($time);
-    if ($ENV{SATPASS_EXTENDED_TIME}) {	# NOT SUPPORTED!!!!!
-	print strftime ($dtfmt, epoch2datetime ($time)), " universal =\n";
-	print '    ', strftime ($dtfmt, epoch2datetime ($sta->dynamical ())),
-	    " dynamical\n";
-##	print '    ', strftime ($dtfmt, localtime ($time)),
-##	    " local standard time\n";
-	print '    ', strftime ($dtfmt, epoch2datetime (
-		floor ($sta->local_mean_time () + .5))),
-	    " local mean time\n";
-	print '    ', strftime ($dtfmt, epoch2datetime (
-		floor ($sta->local_time () + .5))),
-	    " local time\n";
-    } else {
-	print strftime ($dtfmt, gmtime ($time)), " universal =\n";
-	print '    ', strftime ($dtfmt, gmtime ($sta->dynamical ())),
-	    " dynamical\n";
-	print '    ', strftime ($dtfmt, localtime ($time)),
-	    " local standard time\n";
-	print '    ', strftime ($dtfmt, gmtime (
-		floor ($sta->local_mean_time () + .5))),
-	    " local mean time\n";
-	print '    ', strftime ($dtfmt, gmtime (
-		floor ($sta->local_time () + .5))),
-	    " local time\n";
-    }
+    print strftime ($dtfmt, gmtime ($time)), " universal =\n";
+    print '    ', strftime ($dtfmt, gmtime ($sta->dynamical ())),
+	" dynamical\n";
+    print '    ', strftime ($dtfmt, localtime ($time)),
+	" local standard time\n";
+    print '    ', strftime ($dtfmt, gmtime (
+	    floor ($sta->local_mean_time () + .5))),
+	" local mean time\n";
+    print '    ', strftime ($dtfmt, gmtime (
+	    floor ($sta->local_time () + .5))),
+	" local time\n";
 }
 
 ########################################################################
@@ -2498,10 +2359,11 @@ eod
 #	_aggregate ();
 
 #	This is just a wrapper for
-#	Astro::Coord::ECI::TLE::Set->aggregate.
+#	Astro::Coord::ECI::TLE::Set->aggregate. You can pass a single
+#	hash ref for the options hash.
 
 sub _aggregate {
-Astro::Coord::ECI::TLE::Set->aggregate (@bodies);
+    Astro::Coord::ECI::TLE::Set->aggregate (@_, @bodies);
 }
 
 #	_display_timing ()
@@ -2614,8 +2476,8 @@ sub _flatten {
 sub _format_local_az_rng {
 @_ or return ' azim     range    ';
 @_ or return ' azim     range    ';
-@_ == 2 && UNIVERSAL::isa ($_[0], 'Astro::Coord::ECI') &&
-    UNIVERSAL::isa ($_[1], 'Astro::Coord::ECI') or die <<eod;
+@_ == 2 && embodies ($_[0], 'Astro::Coord::ECI') &&
+    embodies ($_[1], 'Astro::Coord::ECI') or die <<eod;
 Programming error - _format_azel () must be called with either zero
     or two arguments. If two, both must be Astro::Coord::ECI objects.
 eod
@@ -3047,26 +2909,10 @@ BEGIN {	# Begin local symbol block.
 	    $last_time_set - $delta;
 	}
       else {
-	if ($ENV{SATPASS_EXTENDED_TIME}) {	# NOT SUPPORTED!!!!!
-	    my @dtinfo = UnixDate ($time, qw{%S %M %H %d %m %Y %z});
-	    @dtinfo or die <<eod;
+	$last_time_set = (UnixDate ($time, '%s') || die <<eod
 Error - Invalid time '$time'
 eod
-	    my $zone = pop @dtinfo;
-	    $dtinfo[4] -= 1;
-	    $dtinfo[5] -= 1900;
-	    my $sign = $zone < 0
-		and $zone = abs ($zone);
-	    my $min = $zone % 100;
-	    $zone = (floor ($zone / 100) * 60 + $min) * 60;
-	    $sign and $zone = -$zone;
-	    $last_time_set = date2epoch (@dtinfo) - $zone;
-	} else {
-	    $last_time_set = (UnixDate ($time, '%s') || die <<eod
-Error - Invalid time '$time'
-eod
-		) + $date_manip_fudge;
-	}
+	    ) + $date_manip_fudge;
 	$parm{perltime} and $last_time_set =
 	    timelocal gmtime $last_time_set;
 	$initial_time_set = $last_time_set;
@@ -3234,12 +3080,12 @@ my $time = shift;
 my $choose = $cmdopt{choose} || [];
 my $data;
 if ($time) {
-    $data = [_aggregate (@bodies)];
+    $data = [_aggregate ()];
     }
   elsif ($cmdopt{epoch}) {
+    warn "Debug - Doing _aggregate() with epoch $cmdopt{epoch}";
     my $time = _parse_time ($cmdopt{epoch});
-    $data = [map {UNIVERSAL::isa ($_, 'Astro::Coord::ECI::TLE::Set') ? $_->select ($time) : $_}
-	_aggregate (@bodies)];
+    $data = [_aggregate({select => $time})];
     }
   else {
     $data = \@bodies;
@@ -3297,6 +3143,8 @@ eod
 
 #	We die on any error.
 
+=begin comment
+
 sub _simbad3 {
     _load_module ('Astro::SIMBAD::Query');
     my $query = shift;
@@ -3335,6 +3183,10 @@ eod
     my @temp = ($ra, $dec, $rng, $pmra, $pmdec, $vrec + 0);
     wantarray ? @temp : join ' ', @temp;
 }
+
+=end comment
+
+=cut
 
 
 #	@coordinates = _simbad4 ($query)
@@ -3799,27 +3651,55 @@ macros can be defined to issue frequently-used commands.
 
 =head1 NOTICE
 
-The changes from 0.016 to 0.017 are mostly for compatibility with old
-or new Perls, and to get tests to run under various conditions.
+I plan, probably in the first half of 2009, to restructure this
+package. The plan calls for moving all the .pm files to distribution
+Astro-Coord-ECI, publishing an App-Satpass2 package with a reworked
+version of the F<satpass> script, and abandoning development of the
+Astro-satpass package. My intent is that in the last release of the
+Astro-satpass package, the banner displayed by the F<satpass> script
+will direct the user to App-Satpass2.
 
-The major change from version 0.015 to 0.016 is the addition of the
-model from B<Revisiting Spacetrack Report #3> to Astro::Coord::ECI::TLE
-as model sgp4r, and making the 'model' model call sgp4r rather than sgp4
-or sdp4 as appropriate. Additionally, the period method depends on the
-model called, using a revised calculation if the model is sgp4r or its
-equivalents model or model4r, or the original calculation otherwise.
-B<Revisiting Spacetrack Report #3> is available on line at
-L<http://celestrak.com/publications/AIAA/2006-6753/>.
+Most of the functionality of the App-Satpass2 distribution will be in
+the App::Satpass2 class. A minimal F<satpass2> script will be provided
+to manufacture an App::Satpass2 object and invoke its run method. I will
+try to keep the core functionality the same, and to document in
+App::Satpass2 any incompatibilities introduced.
 
-In a change to functionality added in 0.014, setting the backdate
-attribute false no longer causes errors in the Astro::Coord::ECI::TLE
-pass() method and the Astro::Coord::ECI::TLE::Iridium method if the
-start time is adjusted to be after the end time; instead an empty list
-of passes or flares is returned.
+Since Perl's dependency mechanism is based on module names, not package
+names, I assume that there will be no problems with packages that depend
+on the Astro::Coord::ECI modules. But I will try to give the authors of
+such packages a week's notice before releasing the first Astro-Coord-ECI
+package.
 
-All these changes are in the underlying classes; the only change to the
-satpass script itself is the updating of this information and the
-version.
+One incentive for doing this is to restructure the F<satpass>
+functionality to be more easily testable. Placing the F<satpass>
+functionality in its own object achieves this; indeed the work flushed
+out a couple subtle bugs in the F<satpass> script, whose fixes have been
+back-ported into this script.
+
+A second incentive was that the natural dependencies for the application
+are quite different than those of the Astro::Coord::ECI classes. It
+seemed desirable not to force those who only wanted the latter to
+download and install all the stuff required by the former.
+
+Changes in release 0.020 include:
+
+* Use of Time::y2038 instead of Time::Local functions and core gmtime
+and localtime;
+
+* Elimination of calls to UNIVERSAL::isa and UNIVERSAL::can as
+functions;
+
+* Elimination of support for SIMBAD 3, since the service itself has been
+completely superseded by SIMBAD 4.
+
+* Conversion of height lookup functionality to use
+Geo::WebService::Elevation::USGS. Note that this is an optional module,
+and you will need to install it to get this functionality.
+
+* Add overview documentation;
+
+* Add and correct documentation in various places.
 
 =head1 DETAILS
 
@@ -4149,8 +4029,8 @@ The start_time defaults to 'today noon', and the end_time to +7.
 In addition to the global options, the following options are legal
 for the flare command:
 
--am selects only morning flares -- that is, those after midnight but
-before morning twilight.
+-am ignores morning flares -- that is, those after midnight but before
+morning twilight.
 
 -choose chooses bodies from the observing list. It works the same way
 as the L<choose|/choose> command, but does not alter the observing
@@ -4158,11 +4038,11 @@ list. You can specify multiple bodies by specifying -choose multiple
 times, or by separating your choices with commas. If -choose is not
 specified, the whole observing list is used.
 
--day selects daytime flares -- that is, those between morning
-twilight and evening twilight.
+-day ignores daytime flares -- that is, those between morning twilight
+and evening twilight.
 
--pm selects evening flares -- that is, those between evening
-twilight and midnight.
+-pm ignores evening flares -- that is, those between evening twilight
+and midnight.
 
 -questionable requests that satellites whose status is questionable
 (i.e. 'S') be included. Typically these are spares, or moving
@@ -5354,20 +5234,28 @@ is currently the model normally used for near-Earth objects.
 sdp4 - A deep-space model corresponding to sgp4, but including resonance
 terms. This is currently the model normally used for deep-space objects.
 
+sgp4r - The model from "Revisiting Spacetrack Report #3", which corrects
+and combines sgp4 and sdp4.
+
 sgp8 - A proposed model for near-Earth objects.
 
 sdp8 - A proposed deep-space model corresponding to sgp8.
 
+null - A non-model, which causes no position computation to be done.
+Useful for testing, maybe.
+
 The 'meta-models' implemented are:
 
 model - Use the normal model appropriate to the object. Currently this
-means sgp4 for near-Earth objects and sdp4 for deep-space objects, but
-this will change if the preferred model changes (at least, if I become
-aware of the fact).
+means sgp4r, but this will change if the preferred model changes (at
+least, if I become aware of the fact).
 
 model4 - Use either sgp4 or sdp4 as appropriate. Right now this is the
 same as 'model', but 'model4' will still run sgp4 and sdp4, even if
 they are no longer the preferred models.
+
+model4r - Synonym for sgp4r, implemented to keep the 'meta-models'
+consistent.
 
 model8 - Use either sgp8 or sdp8 as appropriate.
 
@@ -5768,7 +5656,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT
 
-Copyright 2005, 2006, 2007, 2008 by Thomas R. Wyant, III
+Copyright 2005, 2006, 2007, 2008, 2009 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
 
 =head1 LICENSE

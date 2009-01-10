@@ -1,3 +1,5 @@
+package main;
+
 use strict;
 use warnings;
 
@@ -6,9 +8,10 @@ use Astro::Coord::ECI::Moon;
 use Astro::Coord::ECI::Utils qw{deg2rad PI};
 use POSIX qw{strftime floor};
 use Test;
-use Time::Local;
+use Time::y2038;
 
-BEGIN {plan tests => 9}
+BEGIN {plan tests => 36}
+
 use constant TIMFMT => '%d-%b-%Y %H:%M:%S';
 
 my $test = 0;
@@ -27,7 +30,7 @@ my $test = 0;
 #	Note that we're not too picky about the position of the sun, since it's
 #	an extended object. One part in a thousand is less than half its disk.
 
-foreach ([timegm (0, 0, 0, 12, 3, 1992), -3.229126, 133.167265, 368409.7],
+foreach ([timegm (0, 0, 0, 12, 3, 92), -3.229126, 133.167265, 368409.7],
 	) {
     my ($time, $explat, $explong, $expdelta) = @$_;
 ##    my $moon = Astro::Coord::ECI::Moon->dynamical ($time);
@@ -57,7 +60,7 @@ eod
 
 #	This test is based on Meeus' example 49.a, but worked backward.
 
-foreach ([timegm (42, 37, 3, 18, 1, 1977), 0],
+foreach ([timegm (42, 37, 3, 18, 1, 77), 0],
 	) {
     $test++;
     my ($time, $expect) = @$_;
@@ -79,7 +82,7 @@ eod
 
 #	This test is based on Meeus' example 48.a.
 
-foreach ([timegm (0, 0, 0, 12, 3, 1992), 180 - 69.0756, .6786],
+foreach ([timegm (0, 0, 0, 12, 3, 92), 180 - 69.0756, .6786],
 	) {
     my ($time, $expph, $expil) = @$_;
     $expph = deg2rad ($expph);
@@ -103,17 +106,18 @@ eod
     }
 
 
-#	Test 7: next_quarter
+#	Tests 7-8: next_quarter and next_quarter_hash
 
 #	This test is based on Meeus' example 49.1, right way around.
 
-foreach ([timegm (0, 0, 0, 1, 1, 1977), 0, timegm (42, 37, 3, 18, 1, 1977)],
+foreach ([timegm (0, 0, 0, 1, 1, 77), 0, timegm (42, 37, 3, 18, 1, 77)],
 	) {
     $test++;
     my ($time, $quarter, $expect) = @$_;
-    my $got = Astro::Coord::ECI::Moon->dynamical ($time)->
-	next_quarter ($quarter);
+    my $moon = Astro::Coord::ECI::Moon->new();
     my $tolerance = 2;
+
+    my $got = $moon->dynamical ($time)->next_quarter ($quarter);
     print <<eod;
 # Test $test: Next quarter after given time.
 #          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
@@ -123,10 +127,21 @@ foreach ([timegm (0, 0, 0, 1, 1, 1977), 0, timegm (42, 37, 3, 18, 1, 1977)],
 #     Tolerance: $tolerance seconds
 eod
     ok (abs ($got - $expect) < $tolerance);
+
+    $got = $moon->dynamical($time)->next_quarter_hash($quarter);
+    print <<eod;
+# Test $test: Next quarter after given time, as hash
+#          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
+#       Quarter: $quarter
+#      Expected: @{[strftime TIMFMT, gmtime $expect]} (dynamical)
+#           Got: @{[strftime TIMFMT, gmtime $got->{time}]} (dynamical)
+#     Tolerance: $tolerance seconds
+eod
+    ok (abs ($got->{time} - $expect) < $tolerance);
     }
 
 
-#	Tests 8 - 9: Singleton object
+#	Tests 9 - 10: Singleton object
 
 {	# Local symbol block.
     my $skip;
@@ -135,19 +150,20 @@ eod
 	$skip = "Can not load Scalar::Util.";
 	require Scalar::Util;
 	$skip = "Scalar::Util does not implement refaddr ().";
-	UNIVERSAL::can ('Scalar::Util', 'refaddr')
+	Scalar::Util->can('refaddr')
 	    and $skip = undef;
     };
     my @text = qw{different same};
 
     foreach ([1, 1], [0, 0]) {
 	my ($sgl, $expect) = @$_;
-	my $got =  do {
+	my $got;
+	$skip or $got = do {
 	    local $Astro::Coord::ECI::Moon::Singleton = $sgl;
 	    my @moon = map {Astro::Coord::ECI::Moon->new} (0 .. 1);
 	    Scalar::Util::refaddr ($moon[0]) ==
 		Scalar::Util::refaddr ($moon[1]) ? 1 : 0;
-	    } unless $skip;
+	    };
 	$test++;
 	print <<eod;
 # Test $test: \$Astro::Coord::ECI::Moon::Singleton = $sgl
@@ -157,4 +173,71 @@ eod
 	skip ($skip, $skip || $got eq $expect);
 	}
     }
+
+#	Tests 11-36: almanac() and almanac_hash, testing against data
+#	from the U. S. Naval Observatory
+
+{
+    my $sta = Astro::Coord::ECI->new(
+	name => 'Washington, DC'
+    )->geodetic(
+	deg2rad(38.9),	# Position according to
+	deg2rad(-77.0),	# U. S. Naval Observatory's
+	0,		# http://aa.usno.navy.mil/data/docs/RS_OneDay.php
+    );
+    my $time = timegm (0, 0, 5, 1, 0, 108);	# Jan 1, 2008 in TZ -5
+
+    my $moon = Astro::Coord::ECI::Moon->new();
+
+    my @title = qw{time event detail description};
+    my @accessor = (
+	[sub {$_[0][0]}, sub {$_[0][1]}, sub {$_[0][2]}, sub {$_[0][3]}],
+	[sub {$_[0]{time}}, sub {$_[0]{almanac}{event}},
+	sub {$_[0]{almanac}{detail}}, sub {$_[0]{almanac}{description}}]
+    );
+    my @test = (
+	sub {skip ($_[0], abs ($_[2] - $_[1]) < 60)},
+	sub {skip ($_[0], $_[1] eq $_[2])},
+	sub {skip ($_[0], $_[1] == $_[2])},
+	sub {skip ($_[0], $_[1] eq $_[2])},
+    );
+
+    foreach my $hash (0 .. 1) {
+	my $method = $hash ? 'almanac_hash' : 'almanac';
+	my @list = $moon->universal($time)->$method($sta);
+
+	$test++;
+	print <<eod;
+# Test $test: Items returned by $method()
+#      Expected: 3
+#           Got: @{[scalar @list]}
+eod
+	ok (scalar @list == 3);
+
+	my $inx = 0;
+	foreach my $info (
+	    [timegm(0, 15,  6, 1, 0, 108), horizon => 1, 'Moon rise'],
+	    [timegm(0, 46, 11, 1, 0, 108), transit => 1, 'Moon transits meridian'],
+	    [timegm(0,  8, 17, 1, 0, 108), horizon => 0, 'Moon set'],
+	) {
+	    my $skip = $inx >= @list ? "Index $inx not returned" : undef;
+	    foreach my $item (0 .. 3) {
+		my $got = $accessor[$hash][$item]->($list[$inx]);
+		$test++;
+		print <<eod;
+# Test $test: Item $inx $title[$item]
+#     Expected: $info->[$item]
+#          Got: $got
+eod
+		$inx or print <<eod;
+#    Tolerance: 60
+eod
+		$test[$item]->($skip, $info->[$item], $got);
+	    }
+	    $inx++;
+	}
+    }
+}
+
+1;
 __END__

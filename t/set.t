@@ -1,3 +1,4 @@
+package main;
 
 use strict;
 use warnings;
@@ -6,9 +7,9 @@ use Astro::Coord::ECI::TLE;
 use Astro::Coord::ECI::TLE::Set;
 use t::SetDelegate;
 use Test;
-use Time::Local;
+use Time::y2038;
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 plan tests => 53, todo => [];
 
@@ -26,8 +27,8 @@ eod
     my $skip = $set ? '' : 'Failed to instantiate set.';
 
     foreach ([first => 2, 6, 2006], [second => 4, 6, 2006]) {
-        $@ = undef;
 	my $which = shift @$_;
+	eval {1};	# Clear error indicator.
 	eval {$set->add (dummy (timegm (0, 0, 0, @$_), 99999,
 		'Anonymous'))}
 	    unless $skip;
@@ -51,8 +52,8 @@ eod
 	my $time = timegm (0, 0, 0, splice @$_, 0, 3);
 	my $expect = timegm (0, 0, 0, @$_);
 	$test++;
-	my $got = eval {$set->select ($time)->get ('epoch')}
-	    unless $skip;
+	my $got;
+	$skip or $got = eval {$set->select ($time)->get ('epoch')};
 	print <<eod;
 #
 # Test $test - Select $what set members.
@@ -80,9 +81,10 @@ eod
 	my $time = timegm (0, 0, 0, splice @$_, 0, 3);
 	my $expect = timegm (0, 0, 0, @$_);
 	$test++;
-	$@ = undef;
-	my $tle = eval {$set->universal ($time)} unless $skip;
-	my $got = eval {$tle->get ('epoch')} if $tle && !$@;
+	my ($tle, $got);
+	eval {1};	# Clear error indicator.
+	$skip or $tle = eval {$set->universal ($time)};
+	($tle && !$@) and $got = eval {$tle->get ('epoch')};
 	print <<eod;
 #
 # Test $test - Set universal() $what set members - resultant epoch.
@@ -133,7 +135,8 @@ eod
 	skip ($skip, $time == $got);
     }
 
-    my @members = $set->members() unless $skip;
+    my @members;
+    $skip or @members = $set->members();
     $test++;
     print <<eod;
 #
@@ -143,7 +146,7 @@ eod
 eod
     skip ($skip, @members == 2);
 
-    $@ = undef;
+    eval {1};	# Clear error indicator.
     eval {$set->set_all (name => 'Nemo')} unless $skip;
     $test++;
     print <<eod;
@@ -199,9 +202,9 @@ foreach my $single (0, 1) {
     local $Astro::Coord::ECI::TLE::Set::Singleton = $single;
 
     my @set = eval {Astro::Coord::ECI::TLE::Set->aggregate (
-		dummy (timegm (0, 0, 0, 1, 6, 2006), 99999),
-		dummy (timegm (0, 0, 0, 2, 6, 2006)),
-		dummy (timegm (0, 0, 0, 1, 6, 2006), 11111),
+		dummy (timegm (0, 0, 0, 1, 6, 106), 99999),
+		dummy (timegm (0, 0, 0, 2, 6, 106)),
+		dummy (timegm (0, 0, 0, 1, 6, 106), 11111),
 		)};
     $test++;
     print <<eod;
@@ -242,7 +245,7 @@ eod
 
     my $set1 = Astro::Coord::ECI::TLE::Set->new (
 	t::SetDelegate->new (id => 99999, name => 'Anonymous',
-	epoch => timegm (0, 0, 0, 1, 6, 2006)));
+	epoch => timegm (0, 0, 0, 1, 6, 106)));
     my $set2 = Astro::Coord::ECI::TLE::Set->new ();
     eval {$set2->add ($set1)};
     $test++;
@@ -259,7 +262,7 @@ eod
 {	# Begin local symbol block.
     my $set = Astro::Coord::ECI::TLE::Set->new (
 	t::SetDelegate->new (id => 22222, name => 'Anonymous',
-	epoch => timegm (0, 0, 0, 2, 6, 2006)));
+	epoch => timegm (0, 0, 0, 2, 6, 106)));
     my $skip = $set ? '' : 'Failed to instantiate set';
     foreach ([delegate => 't::SetDelegate'],
 	    [nodelegate => 'Astro::Coord::ECI::TLE::Set'],
@@ -284,7 +287,7 @@ eod
     foreach ([members => 1], [delegate => 0],
 	    [add => t::SetDelegate->new (id => 333333,
 		name => 'Nobody',
-		epoch => timegm (0, 0, 0, 2, 6, 2006))],
+		epoch => timegm (0, 0, 0, 2, 6, 106))],
 	    [members => 1], [delegate => 1],
 	    [clear => 0],
 	    [members => 1], [delegate => 0],
@@ -316,7 +319,7 @@ eod
     my $members = 0;
     foreach ([represents => undef, 'Exception thrown'],
 	    [represents => 'Astro::Coord::ECI', 'Exception thrown'],
-	    [add => dummy (timegm (0, 0, 0, 6, 1, 2006), 99999)],
+	    [add => dummy (timegm (0, 0, 0, 6, 1, 106), 99999)],
 	    [represents => undef, 'Astro::Coord::ECI::TLE'],
 	    [represents => 'Astro::Coord::ECI', 1],
 	    [represents => 'Astro::Coord::ECI::TLE', 1],
@@ -354,15 +357,17 @@ eod
 
 {	# Local symbol block.
 
-my ($id, $name);
-INIT {($id, $name) = (99999, 'Anonymous')};
-sub dummy {
-    (my $epoch = shift) or die <<eod;
+    my ($id, $name);
+    INIT {($id, $name) = (99999, 'Anonymous')};
+    sub dummy {
+	(my $epoch = shift) or die <<eod;
 Error - You must specify the epoch.
 eod
-    $id = $_[0] if $_[0];
-    $name = $_[1] if $_[1];
-    Astro::Coord::ECI::TLE->new (id => $id,
-	name => $name || 'Anonymous', epoch => $epoch, model => 'null');
+	$id = shift || $id;
+	$name = shift || $name;
+	return Astro::Coord::ECI::TLE->new (id => $id,
+	    name => $name || 'Anonymous', epoch => $epoch, model => 'null');
     }
 }	# End of local symbol block.
+
+1;

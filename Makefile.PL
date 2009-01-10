@@ -8,7 +8,7 @@ use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
 use Getopt::Std;
 
-our $VERSION = '0.008';
+our $VERSION = '0.009';
 
 my %opt;
 getopts ('ny', \%opt) or die <<eod;
@@ -20,7 +20,10 @@ eod
 
 my @exe_files;
 my @clean_files;
-my @prereq = ();
+my @prereq = (
+    'Params::Util'	=> 0.25,
+    'Time::y2038'	=> 20081111,
+);
 
 print <<eod;
 
@@ -68,6 +71,11 @@ Optional module Astro::SpaceTrack version 0.016 or higher is needed if
 you wish to retrieve orbital elements directly from Space Track or
 Celestrak into the executable.
 eod
+	    ['Geo::WebService::Elevation::USGS' => 0, <<eod],
+Optional module Geo::WebService::Elevation::USGS is needed if you
+wish to retrieve the elevations of ground positions from the USGS
+web site.
+eod
 	    [$stringmod => 0, <<eod],
 Optional module $stringmod is needed if you wish to pass commands to
 the executable on its command line or to write macros under a version
@@ -85,8 +93,8 @@ eod
 	    ) {
 	my ($module, $version, $info) = @$_;
 	next unless $module;
-	my @mv = $version ? ($module, $version) : ($module);
-	eval "use @mv";
+	eval "require $module";
+	($@ || !$version) or eval {$module->VERSION($version)};
 	$@ or next;
 	print "\n", $info, "\n";
 	}
@@ -121,24 +129,30 @@ eod
 my $vers = '';
 
 (my $mmv = ExtUtils::MakeMaker->VERSION) =~ s/_//g;
-WriteMakefile (
-	NAME => 'Astro::Coord::ECI',
-	DISTNAME => 'Astro-satpass',
-	VERSION_FROM => 'lib/Astro/Coord/ECI.pm',
-	PREREQ_PM => {
-			@prereq
-			},
-	PL_FILES => {},	# Prevent old MakeMaker from running Build.PL
-	EXE_FILES => \@exe_files,
-#	'linkext' => {LINKTYPE => ''},
-	'dist' => {COMPRESS => 'gzip', SUFFIX => 'gz'},
-	realclean => {FILES => join ' ', @clean_files},
-	$] >= 5.005 ? (
-		AUTHOR => 'Tom Wyant (wyant at cpan dot org)',
-		ABSTRACT => 'Classes and app to compute satellite visibility',
-		BINARY_LOCATION => "$Config{archname}$vers/Astro-satpass.tar.gz",
-		($mmv >= 6.31 ?
-		    (LICENSE => 'perl') : ())
-		) : (),
-	);
+
+my %attr = (
+    NAME => 'Astro::Coord::ECI',
+    DISTNAME => 'Astro-satpass',
+    VERSION_FROM => 'lib/Astro/Coord/ECI.pm',
+    PREREQ_PM => { @prereq },
+    PL_FILES => {},	# Prevent old MakeMaker from running Build.PL
+    EXE_FILES => \@exe_files,
+    'dist' => {COMPRESS => 'gzip', SUFFIX => 'gz'},
+    realclean => {FILES => join ' ', @clean_files},
+    AUTHOR => 'Tom Wyant (wyant at cpan dot org)',
+    ABSTRACT => 'Classes and app to compute satellite visibility',
+    BINARY_LOCATION => "$Config{archname}$vers/Astro-satpass.tar.gz",
+);
+
+$mmv >= 6.31 and $attr{LICENSE} = 'perl';
+
+$mmv >= 6.4501 and $attr{META_MERGE} = {
+    build_requires => {
+    },
+    resources => {
+	license => 'http://dev.perl.org/licenses/',
+    },
+};
+
+WriteMakefile (%attr);
 

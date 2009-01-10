@@ -130,15 +130,15 @@ The following methods should be considered public:
 
 =cut
 
+package Astro::Coord::ECI::TLE::Set;
+
 use strict;
 use warnings;
 
-package Astro::Coord::ECI::TLE::Set;
-
 use Carp;
-use UNIVERSAL qw{isa};
+use Params::Util 0.25 qw{_INSTANCE};
 
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 use constant ERR_NOCURRENT => <<eod;
 Error - Can not call %s because there is no current member. Be
@@ -154,15 +154,15 @@ add() method.
 =cut
 
 sub new {
-my $class = shift;
-$class = ref $class if ref $class;
-my $self = {
-    current => undef,	# Current member
-    members => [],	# [epoch, TLE].
+    my ($class, @args) = @_;
+    $class = ref $class if ref $class;
+    my $self = {
+	current => undef,	# Current member
+	members => [],		# [epoch, TLE].
     };
-bless $self, $class;
-$self->add (@_) if @_;
-$self;
+    bless $self, $class;
+    $self->add (@args) if @args;
+    return $self;
 }
 
 
@@ -183,42 +183,42 @@ select() after adding.
 =cut
 
 sub add {
-my $self = shift;
-my ($id, %ep, $class);
-foreach (@{$self->{members}}) {
-    my ($epoch, $tle) = @$_;
-    $id ||= $tle->get ('id');
-    $class ||= ref $tle;
-    $ep{$tle->get ('epoch')} = $tle;
+    my ($self, @args) = @_;
+    my ($id, %ep, $class);
+    foreach (@{$self->{members}}) {
+	my ($epoch, $tle) = @$_;
+	$id ||= $tle->get ('id');
+	$class ||= ref $tle;
+	$ep{$tle->get ('epoch')} = $tle;
     }
-foreach my $tle (map {UNIVERSAL::isa ($_, __PACKAGE__) ?
-	$_->members : $_} @_) {
-    my $aid = $tle->get ('id');
-    if (defined $id) {
-	croak <<eod unless ref $tle && isa ($tle, $class);
+    foreach my $tle (map {_INSTANCE($_, __PACKAGE__) ?
+	    $_->members : $_} @args) {
+	my $aid = $tle->get ('id');
+	if (defined $id) {
+	    _INSTANCE($tle, $class) or croak <<eod;
 Error - Additional member of @{[__PACKAGE__]} must be a
         subclass of $class
 eod
-        croak <<eod if $aid != $id;
+	    $aid == $id or croak <<eod;
 Error - NORAD ID mismatch. Trying to add ID $aid to set defined
         as ID $id.
 eod
-	}
-      else {
-	croak <<eod unless ref $tle && isa ($tle, 'Astro::Coord::ECI::TLE');
+	} else {
+	    _INSTANCE($tle, 'Astro::Coord::ECI::TLE') or croak <<eod;
 Error - First member of @{[__PACKAGE__]} must be a subclass
         of Astro::Coord::ECI::TLE.
 eod
-	$class = ref $tle;
-	$id = $aid;
-	$self->{current} = $tle;
+	    $class = ref $tle;
+	    $id = $aid;
+	    $self->{current} = $tle;
 	}
-    my $aep = $tle->get ('epoch');
-    next if $ep{$aep};
-    $ep{$aep} = $tle;
+	my $aep = $tle->get ('epoch');
+	next if $ep{$aep};
+	$ep{$aep} = $tle;
     }
-@{$self->{members}} = sort {$a->[0] <=> $b->[0]}
-    map {[$_, $ep{$_}]} keys %ep;
+    @{$self->{members}} = sort {$a->[0] <=> $b->[0]}
+	map {[$_, $ep{$_}]} keys %ep;
+    return $self;
 }
 
 
@@ -236,23 +236,43 @@ before you call aggregate(). Actually, any value that Perl will
 interpret as true will work. You might want a 'local' in front of all
 this.
 
+Optionally, the first argument may be a hash reference. The hash
+contains options that modify the function of this method. The only
+option at the moment is
+
+ select => $time
+
+which causes the object best representing the given time to be selected
+in any Astro::Coord::ECI::TLE::Set objects.
+
 =cut
 
 our $Singleton = 0;
 
 sub aggregate {
-my $class = shift;
-$class = ref $class if ref $class;
-my %data;
-foreach my $tle (@_) {
-    my $id = $tle->get ('id');
-    $data{$id} ||= [];
-    push @{$data{$id}}, $tle;
+    my ($class, @args) = @_;
+    $class = ref $class if ref $class;
+    my $opt = ref $args[0] eq 'HASH' ? shift @args : {};
+    my %data;
+    foreach my $tle (@args) {
+	my $id = $tle->get ('id');
+	$data{$id} ||= [];
+	push @{$data{$id}}, $tle;
     }
-map {(@{$data{$_}} > 1 || $Astro::Coord::ECI::TLE::Set::Singleton) ?
-	$class->new (@{$data{$_}}) :
-	@{$data{$_}} ? $data{$_}[0] : ()}
-    sort keys %data;
+    my @rslt;
+    my $limit = $Singleton ? 0 : 1;
+    foreach my $id (sort keys %data) {
+	my $items = @{$data{$id}};
+	if ($items > $limit) {
+	    my $set = $class->new(@{$data{$id}});
+	    exists $opt->{select}
+		and $set->select($opt->{select});
+	    push @rslt, $set;
+	} else {
+	    push @rslt, @{$data{$id}};
+	}
+    }
+    return @rslt;
 }
 
 
@@ -269,11 +289,12 @@ they are not in our namespace.
 =cut
 
 sub can {
-my ($self, $method) = @_;
-my $rslt = UNIVERSAL::can ($self, $method);
-$rslt = UNIVERSAL::can ($self->{current}, $method)
-    if !$rslt && $self->{current};
-$rslt;
+    my ($self, $method) = @_;
+    my $rslt = eval {$self->SUPER::can($method)};
+    $@ and return;
+    $rslt and return $rslt;
+
+    return eval {$self->{current}->can($method)};
 }
 
 
@@ -285,9 +306,10 @@ reloaded with a different NORAD ID.
 =cut
 
 sub clear {
-my $self = shift;
-$self->{current} = undef;
-@{$self->{members}} = ();
+    my $self = shift;
+    $self->{current} = undef;
+    @{$self->{members}} = ();
+    return $self;
 }
 
 
@@ -299,8 +321,30 @@ epoch.
 =cut
 
 sub members {
-my $self = shift;
-map {$_->[1]} @{$self->{members}};
+    my $self = shift;
+    return map {$_->[1]} @{$self->{members}};
+}
+
+=item $set->represents($class)
+
+If the set has a current member, this method returns true if the current
+member represents the given class, or the class name of the current
+member if no argument is given.
+
+If the set has no current member, an exception is thrown.
+
+See the Astro::Coord::ECI represents() method for the details of the
+behavior if the set has a current member.
+
+Normally we would just let AUTOLOAD take care of this, but it turned out
+to be handy to be able to call UNIVERSAL::can on this method.
+
+=cut
+
+sub represents {
+    my ($self, $class) = @_;
+    $self->{current} or croak sprintf ERR_NOCURRENT, 'represents';
+    return $self->{current}->represents($class);
 }
 
 
@@ -324,21 +368,20 @@ member's 'backdate' attribute is false.
 
 =cut
 
-sub select {
-my $self = shift;
-if (defined $_[0]) {
-    my $time = shift;
-    croak <<eod unless @{$self->{members}};
+sub select : method {	## no critic ProhibitBuiltInHomonyms
+    my ($self, $time) = @_;
+    if (defined $time) {
+	croak <<eod unless @{$self->{members}};
 Error - Can not select a member object until you have added members.
 eod
-    my ($epoch, $current);
-    foreach (@{$self->{members}}) {
-	($epoch, $current) = @$_
-	    unless defined $epoch && $_->[0] > $time;
+	my ($epoch, $current);
+	foreach (@{$self->{members}}) {
+	    ($epoch, $current) = @$_
+		unless defined $epoch && $_->[0] > $time;
 	}
-    $self->{current} = $current;
+	$self->{current} = $current;
     }
-$self->{current};
+    return $self->{current};
 }
 
 
@@ -353,17 +396,17 @@ returns.
 =cut
 
 sub set {
-my $self = shift;
-return unless $self->{current};
-while (@_) {
-    my $name = shift;
-    if ($self->{current}->is_model_attribute ($name)) {
-	$self->set_selected ($name, shift);
-	}
-      else {
-	$self->set_all ($name, shift);
+    my ($self, @args) = @_;
+    return $self unless $self->{current};
+    while (@args) {
+	my $name = shift @args;
+	if ($self->{current}->is_model_attribute ($name)) {
+	    $self->set_selected ($name, shift @args);
+	} else {
+	    $self->set_all ($name, shift @args);
 	}
     }
+    return $self;
 }
 
 
@@ -376,10 +419,11 @@ neither does it accomplish anything useful.
 =cut
 
 sub set_all {
-my $self = shift;
-foreach my $member (@{$self->{members}}) {
-    $member->[1]->set (@_);
+    my ($self, @args) = @_;
+    foreach my $member (@{$self->{members}}) {
+	$member->[1]->set (@args);
     }
+    return $self;
 }
 
 =item $set->set_selected ($name => $value ...);
@@ -391,10 +435,10 @@ members.
 =cut
 
 sub set_selected {
-my $self = shift;
-my $delegate = $_[0]{current} or
-    croak sprintf ERR_NOCURRENT, 'set_selected';
-$delegate->set (@_);
+    my ($self, @args) = @_;
+    my $delegate = $self->{current} or
+	croak sprintf ERR_NOCURRENT, 'set_selected';
+    return $delegate->set (@args);
 }
 
 
@@ -406,33 +450,35 @@ $delegate->set (@_);
 my %selector = map {$_ => 1} qw{dynamical universal};
 
 sub AUTOLOAD {
-our $AUTOLOAD;
-(my $routine = $AUTOLOAD) =~ s/.*:://;
-my $delegate = $_[0]{current} or
-    croak sprintf ERR_NOCURRENT, $routine;
-if (@_ > 1 && ($selector{$routine} ||
-	$delegate->is_valid_model ($routine))) {
-    $_[0]->select ($_[1]);
-    $delegate = $_[0]{current};
+    my @args = @_;
+    my $self = $args[0];
+    our $AUTOLOAD;
+    (my $routine = $AUTOLOAD) =~ s/.*:://;
+    my $delegate = $self->{current} or
+	croak sprintf ERR_NOCURRENT, $routine;
+    if (@args > 1 && ($selector{$routine} ||
+	    $delegate->is_valid_model ($routine))) {
+	$self->select ($args[1]);
+	$delegate = $self->{current};
     }
-my $coderef;
-if ($coderef = $delegate->can ("_nodelegate_$routine")) {
-    }
-  elsif ($coderef = $delegate->can ($routine)) {
-    splice @_, 0, 1, $delegate;	# Not $_[0] = $delegate!!!
-    }
-  else {
-    croak <<eod;
+    my $coderef;
+    if ($coderef = $delegate->can ("_nodelegate_$routine")) {
+    } elsif ($coderef = $delegate->can ($routine)) {
+####	splice @args, 0, 1, $delegate;	# Not $_[0] = $delegate!!!
+	$args[0] = $delegate;
+    } else {
+	croak <<eod;
 Error - Can not call $routine because it is not supported by
         class @{[ref $delegate]}
 eod
     }
-$coderef->(@_);
+    return $coderef->(@args);
 }
 
 sub DESTROY {
-my $self = shift;
-$self = undef;
+    my $self = shift;
+    $self = undef;
+    return;
 }
 
 1;
@@ -451,7 +497,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT
 
-Copyright 2006, 2007, 2008 by Thomas R. Wyant, III
+Copyright 2006, 2007, 2008, 2009 by Thomas R. Wyant, III
 (F<wyant at cpan dot org>). All rights reserved.
 
 =head1 LICENSE

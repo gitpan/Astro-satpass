@@ -1,8 +1,11 @@
+package main;
+
 use strict;
 use warnings;
 
 use Astro::Coord::ECI::TLE;
 use File::Spec;
+use IO::File;
 use Test;
 
 my $tle_file = File::Spec->catfile ('t', 'sgp4-ver.tle');
@@ -57,7 +60,9 @@ while (<DATA>) {
     $object_tolerance{$oid} = \@toler;
 }
 
-open (my $rslt, '<', 't/sgp4r.out') or die "Failed to open t/sgp4r.out: $!";
+#### open (my $rslt, '<', 't/sgp4r.out')
+my $rslt = IO::File->new('t/sgp4r.out', '<')
+    or die "Failed to open t/sgp4r.out: $!";
 my $satnum = qr{^\s*(\d+)\s*xx\s*$}i;
 my $test = 0;
 {
@@ -76,6 +81,7 @@ my @satrecs;
     local $/ = undef;	# Slurp mode.
     open (my $fh, '<', $tle_file) or die "Failed to open $tle_file: $!";
     my $data = <$fh>;
+    close $fh;
     @satrecs = Astro::Coord::ECI::TLE->parse ($data);
 }
 
@@ -147,6 +153,7 @@ eod
 		and $max_delta[$inx] = $delta[$inx];
 	}
     }
+    return;
 }
 
 sub bail_out {
@@ -172,11 +179,15 @@ eod
 }
 
 sub prompt {
-    print STDERR @_;
-    return unless defined (my $input = <STDIN>);
+    my @args = @_;	# For Perl::Critic
+    print STDERR @args;
+    return
+	# We're a test module, and want to be fairly lightweight.
+	unless defined (my $input = <STDIN>);	## no critic ProhibitExplicitStdin
     chomp $input;
     return $input;
 }
 
+1;
 __DATA__
 ## 23599	1	1	1	.001	.001	.001

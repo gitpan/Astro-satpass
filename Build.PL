@@ -7,25 +7,38 @@ use Module::Build;
 use Config;
 use FileHandle;
 
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 
-my $bldr = Module::Build->new (
-	dist_author => 'Tom Wyant (wyant at cpan dot org)',
-	dist_abstract => 'Classes and app to compute satellite visibility',
-	module_name => 'Astro::Coord::ECI',
-	dist_name => 'Astro-satpass',
-	dist_version_from => 'lib/Astro/Coord/ECI.pm',
+(my $mbv = Module::Build->VERSION) =~ s/_//g;
 
-	get_options => {y => {}, n => {}},
-	dynamic_config => 1,
-	license => 'perl',
-	);
+my %attr = (
+    dist_author => 'Tom Wyant (wyant at cpan dot org)',
+    dist_abstract => 'Classes and app to compute satellite visibility',
+    module_name => 'Astro::Coord::ECI',
+    dist_name => 'Astro-satpass',
+    dist_version_from => 'lib/Astro/Coord/ECI.pm',
+
+    get_options => {y => {}, n => {}},
+    dynamic_config => 1,
+    license => 'perl',
+);
+
+$mbv >= 0.28 and $attr{meta_merge} = {
+    no_index => {
+	directory => [qw{inc t}],
+    },
+};
+
+my $bldr = Module::Build->new (%attr);
 
 my %opt = $bldr->args ();
 
 my @exe_files;
 my @clean_files;
-my @prereq;
+my @prereq = (
+    'Params::Util'	=> 0.25,
+    'Time::y2038'	=> 20081111,    
+);
 
 print <<eod;
 
@@ -73,6 +86,11 @@ Optional module Astro::SpaceTrack version 0.016 or higher is needed if
 you wish to retrieve orbital elements directly from Space Track or
 Celestrak into the executable.
 eod
+	    ['Geo::WebService::Elevation::USGS' => 0, <<eod],
+Optional module Geo::WebService::Elevation::USGS is needed if you
+wish to retrieve the elevations of ground positions from the USGS
+web site.
+eod
 	    [$stringmod => 0, <<eod],
 Optional module $stringmod is needed if you wish to pass commands to
 the executable on its command line or to write macros under a version
@@ -90,9 +108,8 @@ eod
 	    ) {
 	my ($module, $version, $info) = @$_;
 	next unless $module;
-	my @mv = $version ? ($module, $version) : ($module);
-	eval "use @mv";
-##	$@ or do {push @prereq, $module, $version; next};
+	eval "require $module";
+	($@ || !$version) or eval {$module->VERSION($version)};
 	$@ or next;
 	print "\n", $info, "\n";
 	}

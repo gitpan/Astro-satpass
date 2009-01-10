@@ -9,6 +9,7 @@ eg/sh_script
 eg/tle_period.t
 lib/Astro/Coord/ECI.pm
 lib/Astro/Coord/ECI/Moon.pm
+lib/Astro/Coord/ECI/Overview.pod
 lib/Astro/Coord/ECI/Star.pm
 lib/Astro/Coord/ECI/Sun.pm
 lib/Astro/Coord/ECI/TLE.pm
@@ -17,13 +18,19 @@ lib/Astro/Coord/ECI/TLE/Set.pm
 lib/Astro/Coord/ECI/Utils.pm
 Makefile.PL
 MANIFEST
+MANIFEST.SKIP
 META.yml
 README
 README.MacOS
 t/basic.t
+t/critic.t
 t/eci.t
+t/executable.t
 t/iridium.t
+t/iridium_status.t
+t/manifest.t
 t/moon.t
+t/perlcriticrc
 t/pod.t
 t/pod_coverage.t
 t/semimajor.t
