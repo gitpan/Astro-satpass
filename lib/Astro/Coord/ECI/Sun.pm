@@ -44,7 +44,7 @@ package Astro::Coord::ECI::Sun;
 use strict;
 use warnings;
 
-our $VERSION = '0.008';
+our $VERSION = '0.009';
 
 use base qw{Astro::Coord::ECI};
 
@@ -52,7 +52,13 @@ use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
 use Params::Util 0.25 qw{_CLASSISA};
 use POSIX qw{floor strftime};
-use Time::y2038;
+
+BEGIN {
+    eval {
+	require Time::y2038;
+	Time::y2038->import();
+    };
+}
 
 my %static = (
     id => 'Sun',
@@ -137,7 +143,8 @@ potentially returned:
           2 = fall equinox, 3 = winter solstice.
 
 Twilight is calculated based on the current value of the twilight
-attribute of the $sun object.
+attribute of the $sun object. This attribute is inherited from
+L<Astro::Coord::ECI|Astro::Coord::ECI>, and documented there.
 
 =cut
 

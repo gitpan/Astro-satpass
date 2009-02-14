@@ -106,6 +106,9 @@ The models implemented are:
   SDP8 - corresponds to SGP8, but for deep-space bodies;
   SGP4R - updates and combines SGP4 and SDP4.
 
+All the above models compute ECI coordinates in kilometers, and
+velocities along the same axes in kilometers per second.
+
 There are also some meta-models, with the smarts to run either a
 near-earth model or the corresponding deep-space model depending on the
 body the object represents:
@@ -185,7 +188,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.015';
+our $VERSION = '0.016';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -198,7 +201,17 @@ use Data::Dumper;
 use IO::File;
 use Params::Util 0.25 qw{_CLASSISA _INSTANCE};
 use POSIX qw{floor fmod strftime};
-use Time::y2038;
+
+BEGIN {
+    eval {
+	require Time::y2038;
+	Time::y2038->import();
+	1;
+    } or do {
+	require Time::Local;
+	Time::Local->import();
+    };
+}
 
 {	# Local symbol block.
     my @const = qw{
@@ -1038,7 +1051,7 @@ eod
 				PASS_EVENT_MAX],
 		);
 		$culmination = $time[2][0];
-		warn <<eod if $debug;
+		warn <<eod if $debug;	## no critic (RequireCarping)
 
 Debug - Computed @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[0][0]
 		    ]} $time[0][1]
@@ -1067,7 +1080,7 @@ eod
 			    $lighting[$litup] == $evt->{illumination}
 			    }),
 			    $evt->{illumination}];
-		    warn <<eod if $debug;
+		    warn <<eod if $debug;	## no critic (RequireCarping)
                  @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]} $evt->{illumination}
                  @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[2][0]]} $time[2][1]
 eod
@@ -1095,7 +1108,7 @@ eod
 		    next if $angle > $appulse_dist;
 		    push @time, [$when, PASS_EVENT_APPULSE,
 			appulse => {angle => $angle, body => $body}];
-		    warn <<eod if $debug;
+		    warn <<eod if $debug;	## no critic (RequireCarping)
                 $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]}
 eod
 		}
@@ -1109,7 +1122,8 @@ eod
 #		Generate the full data for the exact events.
 
 		my ($suntim, $rise);
-		warn "Contents of \@time: ", Dumper (\@time) if $debug;
+		warn "Contents of \@time: ", Dumper (\@time)	## no critic (RequireCarping)
+		    if $debug;
 		foreach (sort {$a->[0] <=> $b->[0]} @time) {
 		    my @event = @$_;
 		    my $time = shift @event;
@@ -1561,6 +1575,7 @@ implementation.
 
 sub sgp {
     my ($self, $time) = @_;
+    my $oid = $self->get('id');
     $self->{model_error} = undef;
     my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 
@@ -1575,7 +1590,7 @@ sub sgp {
     my $parm = $self->{&TLE_INIT}{TLE_sgp} ||= do {
 	$self->is_deep and croak <<EOD;
 Error - The SGP model is not valid for deep space objects.
-        Use the SDP4 or SDP8 models instead.
+        Use the SDP4, SDP4R, or SDP8 models instead.
 EOD
 	my $c1 = SGP_CK2 * 1.5;
 	my $c2 = SGP_CK2 / 4;
@@ -1601,7 +1616,7 @@ EOD
 	my $xnodot = -2 * $d30 * $po2no;
 	my $c5 = .5 * $c4 * $sini0 * (3 + 5 * $cosi0) / (1 + $cosi0);
 	my $c6 = $c4 * $sini0;
-	$self->{debug} and warn <<eod;
+	$self->{debug} and warn <<eod;	## no critic (RequireCarping)
 Debug sgp initialization -
         A0 = $a0
         C5 = $c5
@@ -1639,7 +1654,7 @@ eod
     # $a is only magic inside certain constructions, but Perl::Critic
     # either does not know this, or does not realize that it is a
     # lexical variable here.
-    $a =	## no critic RequireLocalizedPunctuationVars
+    $a =	## no critic (RequireLocalizedPunctuationVars)
 	$parm->{a0} * ($self->{meanmotion} / $a) ** SGP_TOTHRD;
     my $e = $a > $parm->{q0} ? 1 - $parm->{q0} / $a : SGP_E6A;
     my $p = $a * (1 - $e * $e);
@@ -1648,7 +1663,7 @@ eod
     my $xls = mod2pi ($parm->{xlo} + ($self->{meanmotion} + $parm->{omgdt} +
 	    $parm->{xnodot} + ($self->{firstderivative} +
 	    $self->{secondderivative} * $tsince) * $tsince) * $tsince);
-    $self->{debug} and warn <<eod;
+    $self->{debug} and warn <<eod;	## no critic (RequireCarping)
 Debug sgp - atmospheric drag and gravity
         TSINCE = $tsince
         A = $a
@@ -1665,7 +1680,7 @@ eod
     my $axnsl = $e * cos ($omgas);
     my $aynsl = $e * sin ($omgas) - $parm->{c6} / $p;
     my $xl = mod2pi ($xls - $parm->{c5} / $p * $axnsl);
-    $self->{debug} and warn <<eod;
+    $self->{debug} and warn <<eod;	## no critic (RequireCarping)
 Debug sgp - long period periodics
         AXNSL = $axnsl
         AYNSL = $aynsl
@@ -1688,7 +1703,7 @@ eod
 	$tem2 > 1 and $tem5 = $tem2 / $tem5;
 	$eo1 += $tem5;
     }
-    $self->{debug} and warn <<eod;
+    $self->{debug} and warn <<eod;	## no critic (RequireCarping)
 Debug sgp - solve equation of Kepler
         U = $u
         EO1 = $eo1
@@ -1702,6 +1717,7 @@ eod
     my $ecose = $axnsl * $coseo1 + $aynsl * $sineo1;
     my $esine = $axnsl * $sineo1 - $aynsl * $coseo1;
     my $el2 = $axnsl * $axnsl + $aynsl * $aynsl;
+    $el2 > 1 and croak "Error - OID $oid Sgp effective eccentricity > 1";
     my $pl = $a * (1 - $el2);
     my $pl2 = $pl * $pl;
     my $r = $a * (1 - $ecose);
@@ -1711,7 +1727,7 @@ eod
     my $sinu = $a / $r * ($sineo1 - $aynsl - $axnsl * $temp);
     my $cosu = $a / $r * ($coseo1 - $axnsl + $aynsl * $temp);
     my $su = _actan ($sinu, $cosu);
-    $self->{debug} and warn <<eod;
+    $self->{debug} and warn <<eod;	## no critic (RequireCarping)
 Debug sgp - short period preliminary quantities
         PL2 = $pl2
         R = $r
@@ -1784,6 +1800,7 @@ model can be used only for near-earth orbits.
 
 sub sgp4 {
     my ($self, $time) = @_;
+    my $oid = $self->get('id');
     $self->{model_error} = undef;
     my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 
@@ -1796,7 +1813,7 @@ sub sgp4 {
     my $parm = $self->{&TLE_INIT}{TLE_sgp4} ||= do {
 	$self->is_deep and croak <<EOD;
 Error - The SGP4 model is not valid for deep space objects.
-        Use the SDP4 or SDP8 models instead.
+        Use the SDP4, SDP4R or SDP8 models instead.
 EOD
 
 
@@ -2001,9 +2018,8 @@ eod
     my $a = $parm->{aodp} * $tempa ** 2;
     my $e = $self->{eccentricity} - $tempe;
     my $xl = $xmp + $omega + $xnode + $parm->{xnodp} * $templ;
-    die <<eod if $e > 1 || $e < -1;
-Error - Effective eccentricity > 1
-    ID = @{[$self->get ('id')]}
+    croak <<eod if $e > 1 || $e < -1;
+Error - OID $oid Sgp4 effective eccentricity > 1
     Epoch = @{[scalar gmtime $self->get ('epoch')]} GMT
     \$self->{bstardrag} = $self->{bstardrag}
     \$parm->{c4} = $parm->{c4}
@@ -2145,6 +2161,7 @@ model can be used only for deep-space orbits.
 
 sub sdp4 {
     my ($self, $time) = @_;
+    my $oid = $self->get('id');
     $self->{model_error} = undef;
     my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 
@@ -2156,8 +2173,8 @@ sub sdp4 {
 
     my $parm = $self->{&TLE_INIT}{TLE_sdp4} ||= do {
 	$self->is_deep or croak <<EOD;
-Error - The SGP4 model is not valid for near-earth objects.
-        Use the SGP, SGP4, or SGP8 models instead.
+Error - The SDP4 model is not valid for near-earth objects.
+        Use the SGP, SGP4, SGP4R, or SGP8 models instead.
 EOD
 
 #*      Recover original mean motion (XNODP) and semimajor axis (AODP)
@@ -2316,6 +2333,8 @@ eod
     my $xmam = $xmdf + $parm->{xnodp} * $templ;
     $self->_dpper (\$e, \$xinc, \$omgadf, \$xnode, \$xmam, $tsince);
     my $xl = $xmam + $omgadf + $xnode;
+    ($e > 1 || $e < -1)
+	and croak "Error - OID $oid Sdp4 effective eccentricity > 1";
     my $beta = sqrt (1 - $e * $e);
     $xn = SGP_XKE / $a ** 1.5;
 
@@ -2435,6 +2454,7 @@ model can be used only for near-earth orbits.
 
 sub sgp8 {
     my ($self, $time) = @_;
+    my $oid = $self->get('id');
     $self->{model_error} = undef;
     my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 
@@ -2447,7 +2467,7 @@ sub sgp8 {
     my $parm = $self->{&TLE_INIT}{TLE_sgp8} ||= do {
 	$self->is_deep and croak <<EOD;
 Error - The SGP8 model is not valid for deep space objects.
-        Use the SDP4 or SDP8 models instead.
+        Use the SDP4, SGP4R, or SDP8 models instead.
 EOD
 
 
@@ -2730,6 +2750,8 @@ eod
 
     my $am = (SGP_XKE / $xn) ** SGP_TOTHRD;
     my $beta2m = 1 - $em * $em;
+    $beta2m < 0
+	and croak "Error - OID $oid Sgp8 effective eccentricity > 1";
     my $sinos = sin ($omgasm);
     my $cosos = cos ($omgasm);
     my $axnm = $em * $cosos;
@@ -2828,6 +2850,7 @@ model can be used only for near-earth orbits.
 
 sub sdp8 {
     my ($self, $time) = @_;
+    my $oid = $self->get('id');
     $self->{model_error} = undef;
     my $tsince = ($time - $self->{epoch}) / 60;	# Calc. is in minutes.
 
@@ -2840,7 +2863,7 @@ sub sdp8 {
     my $parm = $self->{&TLE_INIT}{TLE_sdp8} ||= do {
 	$self->is_deep or croak <<EOD;
 Error - The SDP8 model is not valid for near-earth objects.
-        Use the SGP, SGP4 or SGP8 models instead.
+        Use the SGP, SGP4, SGP4R, or SGP8 models instead.
 EOD
 
 
@@ -2986,6 +3009,8 @@ EOD
 
     my $am = (SGP_XKE / $xn) ** SGP_TOTHRD;
     my $beta2m = 1 - $em * $em;
+    $beta2m < 0
+	and croak "Error - OID $oid Sdp8 effective eccentricity > 1";
     my $sinos = sin ($omgasm);
     my $cosos = cos ($omgasm);
     my $axnm = $em * $cosos;
@@ -4103,7 +4128,7 @@ use constant SGP4R_ERROR_6 => dualvar (6,
 sub _r_dpper {
     my ($self, $t, $eccp, $inclp, $nodep, $argpp, $mp) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
 
 #* -------------------------- Local Variables --------------------------
     my ($alfdp, $betdp, $cosip, $cosop, $dalf, $dbet, $dls, $f2, $f3,
@@ -4286,9 +4311,9 @@ sub _r_dpper {
 sub _r_dscom {
     my ($self, $tc) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
     my $init = $parm->{init}
-        or croak "Error - Sgp4r initialization not in progress";
+        or confess "Programming error - Sgp4r initialization not in progress";
 
 #* -------------------------- Local Variables --------------------------
     my ($c1ss, $c1l, $zcosis, $zsinis, $zsings, $zcosgs, $zes, $zel);
@@ -4554,9 +4579,9 @@ sub _r_dscom {
 sub _r_dsinit {
     my ($self, $t, $tc) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
     my $init = $parm->{init}
-        or croak "Error - Sgp4r initialization not in progress";
+        or confess "Programming error - Sgp4r initialization not in progress";
 
 #* -------------------------- Local Variables --------------------------
     my ($ainv2, $aonv, $cosisq, $eoc, $f220, $f221, $f311, $f321, $f322,
@@ -4881,7 +4906,7 @@ sub _r_dspace {
     my ($self, $t, $tc, $atime, $eccm, $argpm, $inclm, $xli, $mm, $xni,
         $nodem, $dndt, $xn) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
 
 #* -------------------------- Local Variables --------------------------
     my ($iretn, $iret);
@@ -5092,9 +5117,9 @@ sub _r_dspace {
 sub _r_initl {
     my ($self) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
     my $init = $parm->{init}
-        or croak "Error - Sgp4r initialization not in progress";
+        or confess "Programming error - Sgp4r initialization not in progress";
 
 
 #* -------------------------- Local Variables --------------------------
@@ -5255,6 +5280,7 @@ sub _r_initl {
 
 sub _r_sgp4init {
     my ($self) = @_;
+    my $oid = $self->get('id');
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r} = {};
     my $init = $parm->{init} = {};
     # The following is modified in _r_initl
@@ -5309,11 +5335,11 @@ sub _r_sgp4init {
     $t= 0;
 
     $self->{eccentricity} > 1
-        and croak 'Error - Sgp4r TLE eccentricity > 1';
+        and croak "Error - OID $oid Sgp4r TLE eccentricity > 1";
     $self->{eccentricity} < 0
-        and croak 'Error - Sgp4r TLE eccentricity < 0';
+        and croak "Error - OID $oid Sgp4r TLE eccentricity < 0";
     $self->{meanmotion} < 0
-        and croak 'Error - Sgp4r TLE mean motion < 0';
+        and croak "Error - OID $oid Sgp4r TLE mean motion < 0";
     $self->_r_initl();
     if ($init->{rp} <  1) {
 #c            Write(*,*) '# *** SATN',Satn,' EPOCH ELTS SUB-ORBITAL *** '
@@ -5543,6 +5569,7 @@ sub _r_sgp4init {
 
 sub sgp4r {
     my ($self, $t) = @_;
+    my $oid = $self->get('id');
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r} ||= $self->_r_sgp4init ();
     my $time = $t;
     $t = ($t - $self->{epoch}) / 60;
@@ -5623,7 +5650,7 @@ sub sgp4r {
 #c     mean motion less than 0.0
     if ($xn <=  0) {
         $self->{model_error}= &SGP4R_ERROR_2;
-        croak 'Error - ', &SGP4R_ERROR_MEAN_MOTION;
+        croak "Error - OID $oid ", &SGP4R_ERROR_MEAN_MOTION;
     }
     $am= ($parm->{xke}/$xn)**&SGP_TOTHRD*$tempa**2;
     $xn= $parm->{xke}/$am**1.5;
@@ -5632,7 +5659,7 @@ sub sgp4r {
     if ($eccm >=  1  ||  $eccm < -0.001  ||  $am <  0.95) {
 #c         write(6,*) '# Error 1, Eccm = ',  Eccm, ' AM = ', AM
         $self->{model_error}= &SGP4R_ERROR_1;
-        croak 'Error - ', &SGP4R_ERROR_MEAN_ECCEN;
+	croak "Error - OID $oid ", &SGP4R_ERROR_MEAN_ECCEN;
     }
     if ($eccm <  0) {
         $eccm= 1e-06
@@ -5667,7 +5694,7 @@ sub sgp4r {
         }
         if ($eccp <  0  ||  $eccp >  1) {
             $self->{model_error}= &SGP4R_ERROR_3;
-            croak 'Error - ', &SGP4R_ERROR_INST_ECCEN;
+            croak "Error - OID $oid ", &SGP4R_ERROR_INST_ECCEN;
         }
 
     }
@@ -5718,7 +5745,7 @@ sub sgp4r {
 #c     semi-latus rectum < 0.0
     if ( $pl <  0 ) {
         $self->{model_error}= &SGP4R_ERROR_4;
-        croak 'Error - ', &SGP4R_ERROR_LATUSRECTUM;
+        croak "Error - OID $oid ", &SGP4R_ERROR_LATUSRECTUM;
     } else {
         $rl= $am*(1-$ecose);
         $rdotl= sqrt($am)*$esine/$rl;
@@ -5876,7 +5903,7 @@ sub _r_gstime {
 sub _r_getgravconst {
     my ($self) = @_;
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-        or croak "Error - Sgp4r not initialized";
+        or confess "Programming error - Sgp4r not initialized";
 
     if ($self->{gravconst_r} == 721) {
         $parm->{radiusearthkm}= 6378.135;
@@ -5920,7 +5947,7 @@ sub _r_dump {
     my $self = shift;
     no warnings qw{uninitialized};
     my $parm = $self->{&TLE_INIT}{TLE_sgp4r}
-	or croak "Sgp4r not initialized";
+	or confess "Programming error - Sgp4r not initialized";
     my $fh = IO::File->new('perldump.out', '>>')
 	or croak "Failed to open perldump.out: $!";
     print $fh ' ========== sgp4r initialization', "\n";
@@ -6076,6 +6103,7 @@ sub _make_tle {
     my $self = shift;
     my $output;
 
+    my $oid = $self->get('id');
     my $name = $self->get('name');
     (defined $name && $name ne '')
 	and $output .= substr ($name, 0, 24) . "\n";
@@ -6087,7 +6115,8 @@ sub _make_tle {
 	    argumentofperigee meananomaly meanmotion
 	    revolutionsatepoch}) {
 	    defined ($ele{$_} = $self->get($_))
-		or croak ucfirst $_, "undefined; can not generate TLE";
+		or croak "OID $oid ", ucfirst $_,
+		    "undefined; can not generate TLE";
 	}
 	my $temp = SGP_TWOPI;
 	foreach (qw{meanmotion firstderivative secondderivative}) {
@@ -6123,7 +6152,6 @@ sub _make_tle {
 	    }
 	}
     }
-    my $oid = $self->get('id');
     $output .= _make_tle_checksum ('1%6s%s %-8s %-14s %10s %8s %8s %s %4s',
 	$oid, $self->get('classification'),
 	$self->get('international'),
@@ -6189,7 +6217,8 @@ eod
 
 #	Initialization
 
-%status = (	# As of 30-Sep-2008, from Kelso's document dated 29-Sep-2008
+%status = (	# As of 13-Feb-2009, from Kelso's document dated 29-Sep-2008,
+    		# hand-updated to show the demise of Iridium 33.
           '25432' => {
                        'comment' => '',
                        'status' => 0,
@@ -6815,8 +6844,8 @@ eod
                        'id' => 25777
                      },
           '24946' => {
-                       'comment' => '',
-                       'status' => 0,
+                       'comment' => 'Collided with Cosmos 2251',
+                       'status' => 2,
                        'name' => 'Iridium 33',
                        'class' => 'Astro::Coord::ECI::TLE::Iridium',
                        'type' => 'iridium',

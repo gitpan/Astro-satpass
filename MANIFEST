@@ -2,8 +2,10 @@ bin/satpass
 Build.PL
 Changes
 eg/almanac
+eg/closest
 eg/iridium
 eg/iss
+eg/positions
 eg/README
 eg/sh_script
 eg/tle_period.t
@@ -40,5 +42,6 @@ t/sgp4r.out
 t/star.t
 t/sun.t
 t/tle.t
+t/tle_exception.t
 t/tle_sgp4r.t
 t/tle_support.t

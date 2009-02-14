@@ -117,14 +117,21 @@ use warnings;
 
 use base qw{Astro::Coord::ECI::TLE};
 
-our $VERSION = '0.007';
+our $VERSION = '0.008';
 
 use Astro::Coord::ECI::Sun;
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
 use Params::Util 0.25 qw{_INSTANCE};
 use POSIX qw{floor strftime};	# For debugging
-use Time::y2038;
+
+BEGIN {
+    eval {
+	require Time::y2038;
+	Time::y2038->import();
+	1;
+    };
+}
 
 use constant ATTRIBUTE_KEY => '_sub_TLE_Iridium';
 use constant DEFAULT_MAX_MIRROR_ANGLE => deg2rad (10);
@@ -1506,7 +1513,7 @@ sub _reflection_fixed {
 
 	my $angle = _flare_calculate_angle_list (
 		$tle_vector, $mma, $illum_vector, $station_vector);
-	warn <<eod if $debug;
+	warn <<eod if $debug;	## no critic (RequireCarping)
         MMA $mma Angle: @{[defined $angle ? rad2deg ($angle) . ' degrees' :
 		'undefined']}
 eod

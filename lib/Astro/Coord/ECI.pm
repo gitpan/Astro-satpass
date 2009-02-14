@@ -69,14 +69,13 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.020';
+our $VERSION = '0.021';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
 use Data::Dumper;
 use Params::Util 0.25 qw{_CLASSISA};
 use POSIX qw{floor strftime};
-use Time::Local;
 
 use constant MINUSONEDEGREE => deg2rad (-1);
 
@@ -1127,7 +1126,7 @@ sub geodetic {
 	# The $b is _not_ a magic variable, since we are not inside
 	# any of the specialized blocks that make $b magic. Perl::Critic
 	# is simply confused.
-	$b = - $b	## no critic RequireLocalizedPunctuationVars
+	$b = - $b	## no critic (RequireLocalizedPunctuationVars)
 	    if $z < 0;	# Per Borkowski, for southern hemisphere.
 
 
@@ -1992,10 +1991,19 @@ eod
 sub _call_time_set {
     my $self = shift;
     $self->can ('time_set') or return;
+    my $exception;
     unless ($self->{_no_set}++) {
-	$self->time_set ();
+	eval {$self->time_set (); 1;}
+	    or $exception = $@;
     }
-    return --$self->{_no_set} or delete $self->{_no_set};
+    --$self->{_no_set} or delete $self->{_no_set};
+    if ($exception) {
+	$self->{universal} = undef;
+	$self->{dynamical} = undef;
+	# Re-raise the exception not that we have cleaned up.
+	die $exception;	## no critic (RequireCarping)
+    }
+    return;
 }
 
 #	$coord->_check_coord (method => \@_)
@@ -2347,6 +2355,12 @@ Some of the usual values are:
  astronomical twilight: -18 degrees
 
 The default is -6 degrees (or, actually, the equivalent in radians).
+
+For example, to set nautical twilight you could do
+
+ $eci->set(twilight => deg2rad(-12));
+
+where C<deg2rad()> is imported from Astro::Coord::ECI::Utils.
 
 =back
 

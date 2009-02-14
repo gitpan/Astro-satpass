@@ -8,7 +8,7 @@ use ExtUtils::MakeMaker qw{WriteMakefile prompt};
 use FileHandle;
 use Getopt::Std;
 
-our $VERSION = '0.009';
+our $VERSION = '0.010';
 
 my %opt;
 getopts ('ny', \%opt) or die <<eod;
@@ -22,7 +22,6 @@ my @exe_files;
 my @clean_files;
 my @prereq = (
     'Params::Util'	=> 0.25,
-    'Time::y2038'	=> 20081111,
 );
 
 print <<eod;
@@ -60,11 +59,10 @@ my $stringmod = $] >= 5.008 ? '' : 'IO::String';
 
 if (@exe_files) {
     push @prereq, 'Date::Manip' => 1.14;
-    foreach (['Astro::SIMBAD::Query' => 0, <<eod],
-Optional module Astro::SIMBAD::Query is needed if you wish to retrieve
+    foreach (['Astro::SIMBAD::Client' => 0, <<eod],
+Optional module Astro::SIMBAD::Client is needed if you wish to retrieve
 star positions directly from the SIMBAD catalog via the 'sky lookup'
-command. This functionality is experimental, and is expected to break
-when SIMBAD goes to version 4.
+command.
 eod
 	    ['Astro::SpaceTrack' => 0.016, <<eod],
 Optional module Astro::SpaceTrack version 0.016 or higher is needed if
@@ -148,6 +146,9 @@ $mmv >= 6.31 and $attr{LICENSE} = 'perl';
 
 $mmv >= 6.4501 and $attr{META_MERGE} = {
     build_requires => {
+    },
+    recommends => {
+	'Time::y2038' => 20081111,
     },
     resources => {
 	license => 'http://dev.perl.org/licenses/',

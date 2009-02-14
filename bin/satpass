@@ -27,7 +27,17 @@ use POSIX qw{floor strftime};
 use Term::ReadLine;
 use Text::Abbrev;
 use Text::ParseWords;
-use Time::y2038;
+
+BEGIN {
+    eval {
+	require Time::y2038;
+	Time::y2038->import();
+	1;
+    } or do {
+	require Time::Local;
+	Time::Local->import();
+    };
+}
 
 my (
 	$clipboard_unavailable,
@@ -42,7 +52,7 @@ my $xml_parser;
 #	Initialization
 #
 
-our $VERSION = '0.020';
+our $VERSION = '0.021';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -83,6 +93,7 @@ my %parm = (
     flare_mag_day => -6,
     flare_mag_night => 0,
     geometric => 1,
+    gmt => 0,
     horizon => 20,	# Degrees
     lit => 1,
     local_coord => 'azel_rng',
@@ -123,6 +134,7 @@ my %mutator = (
     flare_mag_day => \&_set_unmodified,
     flare_mag_night => \&_set_unmodified,
     geometric => \&_set_unmodified,
+    gmt => \&_set_unmodified,
     height => \&_set_unmodified,
     horizon => \&_set_angle,
     latitude => \&_set_angle,
@@ -248,6 +260,8 @@ eod
     }
 
 $ENV{SATPASSINI} = $inifil;
+
+my $interrupted = 'Interrupted by user.';
 
 $opt{clipboard} and select (IO::Clipboard->new ());
 
@@ -500,14 +514,11 @@ eod
 #	call it, fielding any exceptions thrown and turning them into
 #	warnings.
 
-      elsif (__PACKAGE__->can($verb)) {
+      elsif (my $code = __PACKAGE__->can($verb)) {
 	_parse_time_reset ();	# Reset relative time base to last explicit
-	no strict qw{refs};
-	$SIG{INT} = sub {die "\nInterrupted by user.\n"};
-	eval {&$verb (@args)};
+	local $SIG{INT} = sub {die "\n$interrupted\n"};
+	eval {$code->(@args)};
 	$error = $@;
-	$SIG{INT} = 'DEFAULT';
-	use strict qw{refs};
 	}
 
 #	Else, complain about the unrecognized verb.
@@ -631,10 +642,10 @@ foreach (sort {$a->[0] <=> $b->[0]} @almanac) {
 	}
     } else {
 	$descr = ('End ', 'Begin ')[$detail] . $id if $event eq 'twilight';
-	my $day = strftime $parm{date_format}, localtime $time;
+	my $day = strftime $parm{date_format}, _mytime($time);
 	print "$day\n" if $day ne $last;
 	$last = $day;
-	print strftime ($parm{time_format}, localtime $time), ' ',
+	print strftime ($parm{time_format}, _mytime($time)), ' ',
 	    ucfirst $descr, "\n";
 	}
     }
@@ -802,7 +813,7 @@ eod
 
 BEGIN {
 $cmdlgl{flare} = [qw{algorithm=s am choose=s@ day dump flatten pm
-    questionable|spare}];
+    questionable|spare quiet}];
 }
 
 sub flare {
@@ -870,14 +881,12 @@ if ($cmdopt{debug}) {
 
 my @flares;
 foreach my $tle (@active) {
-    my $bm_start = time ();
-    push @flares, $tle->flare ($sta, $pass_start, $pass_end);
-
-
-#	Compute and display stats.
-
-    my $bm_end = time ();
+    push @flares, eval {$tle->flare ($sta, $pass_start, $pass_end)};
+    if ($@) {
+	$@ =~ m/$interrupted/o and die $@;
+	!$cmdopt{quiet} and warn $@;
     }
+}
 
 my $last_day = '';
 my $fmt = <<eod;
@@ -906,10 +915,11 @@ foreach my $fd (sort {$a->{time} <=> $b->{time}} @flares) {
 
     my $tle = $fd->{body}->universal ($time);
 
-    my $day = strftime ($parm{date_format}, localtime $time);
+    my $displaytime = floor($time + .5);
+    my $day = strftime ($parm{date_format}, _mytime($displaytime));
     print "$day\n" if $day ne $last_day && !$cmdopt{dump};
     $last_day = $day;
-    $time = strftime ($parm{time_format}, localtime floor ($time + .5));
+    $time = strftime ($parm{time_format}, _mytime($displaytime));
     my $name = ucfirst lc ($tle->get ('name') || $tle->get ('id'));
     my ($ctr_azm, $ctr_ele, $ctr_rng) = $sta->azel ($fd->{center}{body}, 0);
     if ($cmdopt{dump}) {
@@ -986,6 +996,15 @@ goto \&{$handler};
 sub geocode_ca {
 _load_module ('LWP::UserAgent', 'geocode_ca');
 _load_module ('XML::Parser', 'geocode_ca');
+
+warn <<eod;
+
+Warning - Geocoding Canadian addresses is now unsupported, and probably
+        will not work anyway, because geocoder.ca has started requiring
+        registration to use its free port. My apologies for the
+        inconvenience.
+
+eod
 
 my $set_loc = @_;
 my $loc = shift @_ || $parm{location};
@@ -1337,12 +1356,13 @@ BEGIN {
 
 sub list {
 if (@bodies) {
-    my $dtfmt = "$parm{date_format} $parm{time_format}";
+    my $dtfmt = "$parm{date_format} $parm{time_format} " . ($parm{gmt}
+	? "(GMT)" : "(local)");
     print "\n";
     foreach my $tle (_select_observing_list ()) {
 	my $id = $tle->get ('id');
 	my $name = $tle->get ('name');
-	my $epoch = strftime "$dtfmt (local)", localtime $tle->get ('epoch');
+	my $epoch = strftime $dtfmt, _mytime($tle->get ('epoch'));
 	$name = $name ? " - $name" : '';
 	my $secs = floor ($tle->period + .5);
 	my $mins = floor ($secs / 60);
@@ -1462,7 +1482,7 @@ eod
 		$_[0]{appulse}{body}->get ('name') ||
 		$_[0]{appulse}{body}->get ('id')};
 
-	$cmdlgl{pass} = [qw{choose=s@ dump flatten}];
+	$cmdlgl{pass} = [qw{choose=s@ dump flatten quiet}];
     }
 
     sub pass {
@@ -1535,8 +1555,14 @@ eod
 	    visible => $parm{visible},
 	);
 
-	my @passes = $tle->pass (
-	    $sta, $pass_start, $pass_end, \@sky) or next;
+	my @passes = eval {$tle->pass (
+		$sta, $pass_start, $pass_end, \@sky)};
+	if ($@) {
+	    $@ =~ m/$interrupted/o and die $@;
+	    $cmdopt{quiet} or warn $@;
+	    next;
+	}
+       	@passes or next;
 
 	my $id = $tle->get ('id');
 	my $name = $tle->get ('name') || '';
@@ -1553,7 +1579,9 @@ eod
 	    }
 	    foreach my $event (@{$pass->{events}}) {
 		my $time = $event->{time};
-		my $date = strftime ($parm{date_format}, localtime $time);
+		my $displaytime = floor($time + .5);
+		my $date = strftime ($parm{date_format},
+		    _mytime($displaytime));
 		if ($date ne $last_date) {
 		    print "$date\n" unless $cmdopt{dump};
 		    $last_date = $date;
@@ -1570,8 +1598,8 @@ eod
 			print Dumper ($event);
 		    }
 		} else {
-		    printf LINFMT, strftime ($parm{time_format}, localtime (
-			    floor ($time + .5))),
+		    printf LINFMT, strftime ($parm{time_format}, _mytime (
+			    $displaytime)),
 			$lcfmt->($sta, $tle),
 			rad2deg ($lat), rad2deg ($long), $alt,
 			$event_name[$event->{illumination}]->($event),
@@ -1582,8 +1610,8 @@ eod
 			    ->universal ($time);
 			my ($lat, $long, $alt) = $body->geodetic;
 			printf BGFMT, strftime (
-				$parm{time_format}, localtime (
-				    floor ($time + .5))),
+				$parm{time_format}, _mytime (
+				    $displaytime)),
 			    $lcfmt->($sta, $body),
 			    rad2deg ($lat), rad2deg ($long),
 			    $body->get ('name') || $body->get ('id') || '';
@@ -1622,7 +1650,7 @@ foreach my $body (@sky) {
     my $name;
     foreach (@table) {$_->[0] > $phase or next; $name = $_->[1]; last}
     printf "%s @{[$body->get ('name')]} phase %.0f deg, %s, %.0f%% illum.\n",
-	strftime ($dtfmt, localtime $time), $phase, $name, $illum * 100;
+	strftime ($dtfmt, _mytime($time)), $phase, $name, $illum * 100;
     }
 }
 }	# end of BEGIN block
@@ -1634,7 +1662,7 @@ foreach my $body (@sky) {
 #
 
 BEGIN {
-$cmdlgl{position} = [qw{choose=s@ questionable|spare realtime}];
+$cmdlgl{position} = [qw{choose=s@ questionable|spare quiet realtime}];
 }
 
 sub position {
@@ -1659,7 +1687,7 @@ my $sun = Astro::Coord::ECI::Sun->new ();
 printf <<eod, _format_location (),
 %s            name @{[$lcfmt->()]} %-*s illum
 eod
-	length (strftime $dtfmt, localtime time), 'epoch of data';
+	length (strftime $dtfmt, _mytime(time)), 'epoch of data';
 
 #	Tell aggregate() how to work.
 
@@ -1668,17 +1696,23 @@ local $Astro::Coord::ECI::TLE::Set::Singleton = $parm{singleton};
 my $when = time ();
 my $indent;
 while ($time <= $endtm) {
-    print strftime ($dtfmt, localtime $time), "\n";
+    print strftime ($dtfmt, _mytime($time)), "\n";
     foreach my $body (_select_observing_list ($time), @sky) {
 	$body->set(debug => $cmdopt{debug});
-	$body->universal ($time);
+	eval {$body->universal ($time); 1;}
+	    or do {
+	    $@ =~ m/$interrupted/o and die $@;
+	    $cmdopt{quiet} or warn $@;
+	    next;
+	};
 	my $name = $body->get ('name') || $body->get ('id') || 'body';
+	$name = substr $name, 0, 16;
 	if ($body->represents ('Astro::Coord::ECI::TLE')) {
 	    my $illum = ($sta->azel ($body))[1] < 0 ? 10 :
 		($sta->azel ($sun->universal ($time)))[1] > $twilight ? 2 :
 		($body->azel ($sun))[1] > $body->dip() ? 1 : 0;
 	    printf "%16s %s %s %s\n", $name, $lcfmt->($sta, $body),
-		strftime ($dtfmt, localtime $body->get ('epoch')),
+		strftime ($dtfmt, _mytime($body->get ('epoch'))),
 		$lighting[$illum] || '';
 
 	    if ($body->can_flare ($cmdopt{questionable})) {
@@ -1764,7 +1798,7 @@ sub quarters {
 	    }
 	} else {
 	    my ($time, $quarter) = @$_;
-	    print strftime ($dtfmt, localtime $time), " $quarter\n";
+	    print strftime ($dtfmt, _mytime($time)), " $quarter\n";
 	}
     }
 
@@ -1926,7 +1960,7 @@ eod
 
 sub _show_time {
 defined $parm{$_[0]} ?
-    strftime ('%d-%b-%Y %H:%M:%S', localtime $parm{$_[0]}) :
+    strftime ('%d-%b-%Y %H:%M:%S', _mytime($parm{$_[0]})) :
     'undef'
 }
 
@@ -2475,7 +2509,6 @@ sub _flatten {
 
 sub _format_local_az_rng {
 @_ or return ' azim     range    ';
-@_ or return ' azim     range    ';
 @_ == 2 && embodies ($_[0], 'Astro::Coord::ECI') &&
     embodies ($_[1], 'Astro::Coord::ECI') or die <<eod;
 Programming error - _format_azel () must be called with either zero
@@ -2830,6 +2863,15 @@ BEGIN {	# Begin local symbol block
     }
 
 }	# end local symbol block.
+
+#	@times = _mytime($time);
+
+#	Returns seconds, minutes, hours, and so on. It is localtime if
+#	the gmt parameter is false, or GMT if it is true.
+
+sub _mytime {
+    return $parm{gmt} ? gmtime($_[0]) : localtime($_[0]);
+}
 
 #	$angle = _parse_angle ($string)
 
@@ -3682,24 +3724,21 @@ are quite different than those of the Astro::Coord::ECI classes. It
 seemed desirable not to force those who only wanted the latter to
 download and install all the stuff required by the former.
 
-Changes in release 0.020 include:
+Changes in release 0.021 include:
 
-* Use of Time::y2038 instead of Time::Local functions and core gmtime
-and localtime;
+* Time::y2030 is recommended rather than required, since ActivePerl had
+trouble with the requirement.
 
-* Elimination of calls to UNIVERSAL::isa and UNIVERSAL::can as
-functions;
+* Elimination of support for geocoder.ca, which started requiring
+registration.
 
-* Elimination of support for SIMBAD 3, since the service itself has been
-completely superseded by SIMBAD 4.
+* Ruggedizing of flare, pass, and position, so that one bogus set of
+orbital elements does not abort the entire calculation.
 
-* Conversion of height lookup functionality to use
-Geo::WebService::Elevation::USGS. Note that this is an optional module,
-and you will need to install it to get this functionality.
-
-* Add overview documentation;
-
-* Add and correct documentation in various places.
+* Iridium 33 is marked as tumbling in the canned list of Iridium
+statuses. Since its collision with Cosmos 2251 on 10-Feb-2009, the
+question of its existence is problematic, but at least this change will
+prevent flares from being forecast. Stay tuned for further developments.
 
 =head1 DETAILS
 
@@ -4048,6 +4087,10 @@ and midnight.
 (i.e. 'S') be included. Typically these are spares, or moving
 between planes. You may use -spare as a synonym for this.
 
+-quiet suppresses any errors generated by running the orbital model.
+These are typically from obsolete data, and/or decayed satellites.
+Bodies that produce errors will not be included in the output.
+
 See the L</SPECIFYING TIMES> topic below for how to specify times.
 
 For example, assuming the observers' location has already been set, you
@@ -4116,6 +4159,10 @@ American Samoa is handled by L<geocode_us|/geocode_us>.
 =for html <a name="geocode_ca"></a>
 
 =item geocode_ca location
+
+B<Notice:> This command is unsupported as of satpass 0.021, and
+probably will not work anyway, since geocoder.ca has started
+requiring registration to use its free port.
 
 This command attempts to look up the given location (either street
 address or street intersection) at L<http://geocoder.ca/>. The results
@@ -4488,6 +4535,10 @@ list. You can specify multiple bodies by specifying -choose multiple
 times, or by separating your choices with commas. If -choose is not
 specified, the whole observing list is used.
 
+-quiet suppresses any errors generated by running the orbital model.
+These are typically from obsolete data, and/or decayed satellites.
+Bodies that produce errors will not be included in the output.
+
 =for html <a name="phase"></a>
 
 =item phase time
@@ -4533,6 +4584,10 @@ specified, the whole observing list is used.
 
 -questionable causes the code to consider spares (status 'S') to be
 capable of flaring. You may use -spare as a synonym for this.
+
+-quiet suppresses any errors generated by running the orbital model.
+These are typically from obsolete data, and/or decayed satellites.
+Bodies that produce errors will not be included in the output.
 
 -realtime causes a running display in near-real-time. The default
 end_time changes to '+10' (i.e. 10 days), and the default interval to
@@ -5115,6 +5170,15 @@ versus the geometric horizon (elevation 0 degrees). If false, it
 is versus whatever the 'horizon' parameter specifies.
 
 The default is 1 (i.e. true).
+
+=for html <a name="gmt"></a>
+
+=item gmt (boolean)
+
+This parameter specifies whether output times are local (if false) or
+GMT (if true).
+
+The default is 0 (i.e. false).
 
 =for html <a name="height"></a>
 
