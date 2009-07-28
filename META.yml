@@ -1,23 +1,27 @@
 ---
 name: Astro-satpass
-version: 0.023
+version: 0.023_01
 author:
   - Tom Wyant (wyant at cpan dot org)
 abstract: Classes and app to compute satellite visibility
 license: perl
 resources:
   license: http://dev.perl.org/licenses/
+build_requires:
+  Test::More: 0.4
 requires:
   Date::Manip: 1.14
   Params::Util: 0.25
   perl: 5.006
 recommends:
   Time::y2038: 20081111
+configure_requires:
+  Module::Build: 0.34
 dynamic_config: 1
 provides:
   Astro::Coord::ECI:
     file: lib/Astro/Coord/ECI.pm
-    version: 0.023
+    version: 0.023_01
   Astro::Coord::ECI::Moon:
     file: lib/Astro/Coord/ECI/Moon.pm
     version: 0.006
@@ -29,20 +33,20 @@ provides:
     version: 0.009
   Astro::Coord::ECI::TLE:
     file: lib/Astro/Coord/ECI/TLE.pm
-    version: 0.017
+    version: 0.017_04
   Astro::Coord::ECI::TLE::Iridium:
     file: lib/Astro/Coord/ECI/TLE/Iridium.pm
-    version: 0.008
+    version: 0.008_01
   Astro::Coord::ECI::TLE::Set:
     file: lib/Astro/Coord/ECI/TLE/Set.pm
-    version: 0.006
+    version: 0.006_02
   Astro::Coord::ECI::Utils:
     file: lib/Astro/Coord/ECI/Utils.pm
-    version: 0.011
-generated_by: Module::Build version 0.32
+    version: 0.011_01
+generated_by: Module::Build version 0.34
 meta-spec:
-  url: http://module-build.sourceforge.net/META-spec-v1.2.html
-  version: 1.2
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
 no_index:
   directory:
     - inc
