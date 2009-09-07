@@ -5,8 +5,9 @@ propagation models
 
 =head1 SYNOPSIS
 
-The following is a semi-brief script to calculate Iridium flares. You
-will need to substitute your own location where indicated.
+The following is a semi-brief script to calculate International Space
+Station visibility. You will need to substitute your own location where
+indicated.
 
  use Astro::SpaceTrack;
  use Astro::Coord::ECI;
@@ -54,8 +55,15 @@ will need to substitute your own location where indicated.
   
  my $start = time ();
  my $finish = $start + 7 * 86400;
+ 
+ # Loop through our objects and predict passes. The
+ # validate() step is usually not needed for data from
+ # Space Track, but NASA's predicted elements for Space
+ # Shuttle flights can be funky.
+ 
  my @passes;
  foreach my $tle (@sats) {
+    $tle->validate($start, $finish) or next;
     push @passes, $tle->pass($loc, $start, $finish);
  }
  print <<eod;
@@ -182,7 +190,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.018';
+our $VERSION = '0.019';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -654,7 +662,21 @@ sub max_effective_date {
     } elsif (!$self->get('backdate')) {
 	push @args, $self->get('epoch');
     }
-    return max(@args);
+    return max( grep {defined $_} @args );
+}
+
+
+=item $tle = $tle->members();
+
+This method simply returns the object it is called on. It exists for
+convenience in getting back validated objects when iterating over a
+mixture of L<Astro::Coord::ECI::TLE|Astro::Coord::ECI::TLE> and
+L<Astro::Coord::ECI::TLE::Set|Astro::Coord::ECI::TLE::Set> objects.
+
+=cut
+
+sub members {
+    return shift;
 }
 
 
@@ -5767,7 +5789,19 @@ sub sgp4r {
     if ($eccm >=  1  ||  $eccm < -0.001  ||  $am <  0.95) {
 #c         write(6,*) '# Error 1, Eccm = ',  Eccm, ' AM = ', AM
         $self->{model_error}= &SGP4R_ERROR_1;
-	croak "Error - OID $oid ", &SGP4R_ERROR_MEAN_ECCEN;
+	my $tfmt = '%d-%b-%Y %H:%M:%S';
+	my @data = "Error - OID $oid " . &SGP4R_ERROR_MEAN_ECCEN;
+	push @data, "eccentricity = $eccm";
+	foreach my $thing (qw{universal epoch effective}) {
+	    if (defined ( my $value = $self->can($thing) ?
+		    $self->$thing() :
+		    $self->get($thing))) {
+		push @data, strftime("$thing = $tfmt", gmtime $value);
+	    } else {
+		push @data, "$thing is undefined";
+	    }
+	}
+	croak join '; ', @data
     }
     if ($eccm <  0) {
         $eccm= 1e-06
@@ -6210,6 +6244,51 @@ EOD
     Altitude at apogee (derived): @{[$self->apoapsis() - $semimajor]} kilometers
 EOD
     return $result;
+}
+
+=item $valid = $tle->validate($options, $time ...);
+
+This method checks to see if the currently-selected model can be run
+successfully. If so, it returns 1; if not, it returns 0.
+
+The $options argument is itself optional. If passed, it is a reference
+to a hash of option names and values. At the moment the only option used
+is
+
+ quiet => 1 to supress output to STDERR.
+
+If the C<quiet> option is not specified, or is specified as a false
+value, validation failures will produce output to STDERR.
+
+Each $time argument is adjusted by passing it through C<<
+$tle->max_effective_date >>, and the distinct adjusted times are sorted
+into ascending order. The currently-selected model is run at each of the
+times thus computed. The return is 0 if any run fails, or 1 if they all
+succeed.
+
+If there are no $time arguments, the model is run at the effective date
+if that is specified, or the epoch if the effective date is not
+specified.
+
+=cut
+
+sub validate {
+    my ($self, @args) = @_;
+    my $opt = ref $args[0] eq 'HASH' ? shift @args : {};
+    my %args;
+    if (@args) {
+	%args = map { ( $self->max_effective_date( $_ ) => 1 ) } @args;
+    } else {
+	$args{$self->get('effective') || $self->get('epoch')} = 1;
+    }
+    eval {
+	foreach my $time ( sort { $a <=> $b } keys %args ) {
+	    $self->universal( $time );
+	}
+	1;
+    } and return 1;
+    $opt->{quiet} or $@ and warn $@;
+    return 0;
 }
 
 
@@ -7450,3 +7529,5 @@ implied. The author will not be liable for any damages of any sort
 relating in any way to this software.
 
 =cut
+
+# ex: set textwidth=72 :
