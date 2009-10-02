@@ -83,7 +83,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.025';
+our $VERSION = '0.026';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -122,6 +122,7 @@ sub new {
     my ($class, @args) = @_;
     ref $class and $class = ref $class;
     my $self = bless {%static}, $class;
+    $self->{inertial} = $self->_initial_inertial();
     @args and $self->set (@args);
     $self->{debug} and do {
 	local $Data::Dumper::Terse = 1;
@@ -1609,6 +1610,67 @@ sub mean_angular_velocity {
 	$self->{angularvelocity};
 }
 
+=item $time = $coord->next_azimuth( $body, $azimuth );
+
+This method returns the next time the given C<$body> passes the given
+C<$azimuth> as seen from the given C<$coord>, calculated to the nearest
+second. The start time is the current time setting of the C<$body>
+object.
+
+=cut
+
+sub next_azimuth {
+    my ( $self, $body, $azimuth ) = @_;
+    ref $self or croak <<eod;
+Error - The next_azimuth() method may not be called as a class method.
+eod
+
+    $body->represents(__PACKAGE__) or croak <<eod;
+Error - The argument to next_meridian() must be a subclass of
+        @{[__PACKAGE__]}.
+eod
+
+    my $want = shift;
+    defined $want and $want = $want ? 1 : 0;
+
+    my $denom = $body->mean_angular_velocity -
+	$self->mean_angular_velocity;
+    my $retro = $denom >= 0 ? 0 : 1;
+    ($denom = abs ($denom)) < 1e-11 and croak <<eod;
+Error - The next_azimuth() method will not work for geosynchronous
+        bodies.
+eod
+
+    my $apparent = TWOPI / $denom;
+    my $begin = $self->universal;
+    my $delta = floor( $apparent / 8 );
+    my $end = $begin + $delta;
+
+    my $begin_angle = mod2pi(
+	( $self->azel( $body->universal( $begin ) ) )[0] - $azimuth );
+    my $end_angle = mod2pi(
+	( $self->azel( $body->universal( $end ) ) )[0] - $azimuth );
+    while ( $begin_angle < PI || $end_angle >= PI ) {
+	$begin_angle = $end_angle;
+	$begin = $end;
+	$end = $end + $delta;
+	$end_angle = mod2pi(
+	    ( $self->azel( $body->universal( $end ) ) )[0] - $azimuth );
+    }
+
+    while ($end - $begin > 1) {
+	my $mid = floor (($begin + $end) / 2);
+	my $mid_angle = mod2pi(
+	    ( $self->azel( $body->universal( $mid ) ) )[0] - $azimuth );
+	( $begin, $end ) = ( $mid_angle >= PI ) ?
+	    ( $mid, $end ) : ( $begin, $mid );
+    }
+
+    $body->universal ($end);
+    $self->universal ($end);
+    return $end;
+}
+
 
 =item ($time, $rise) = $coord->next_elevation ($body, $elev, $upper)
 
@@ -2372,6 +2434,17 @@ sub _convert_eci_to_ecef {
     $self->{_ECI_cache}{fixed}{ecef} = \@ecef;
     return @ecef;
 }
+
+#	$value = $self->_initial_inertial
+#
+#	Return the initial setting of the inertial attribute. At this
+#	level we are assumed not inertial until we acquire a position.
+#	This is not part of the public interface, but may be used by
+#	subclasses to set an initial value for this read-only attribute.
+#	Setting the coordinates explicitly will still set the {inertial}
+#	attribute appropriately.
+
+sub _initial_inertial{ return };
 
 #	$value = _local_mean_delta ($coord)
 

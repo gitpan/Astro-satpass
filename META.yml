@@ -1,6 +1,6 @@
 ---
 name: Astro-satpass
-version: 0.025
+version: 0.026
 author:
   - Tom Wyant (wyant at cpan dot org)
 abstract: Classes and app to compute satellite visibility
@@ -20,19 +20,19 @@ dynamic_config: 1
 provides:
   Astro::Coord::ECI:
     file: lib/Astro/Coord/ECI.pm
-    version: 0.025
+    version: 0.026
   Astro::Coord::ECI::Moon:
     file: lib/Astro/Coord/ECI/Moon.pm
-    version: 0.006
+    version: 0.007
   Astro::Coord::ECI::Star:
     file: lib/Astro/Coord/ECI/Star.pm
     version: 0.006
   Astro::Coord::ECI::Sun:
     file: lib/Astro/Coord/ECI/Sun.pm
-    version: 0.009
+    version: 0.010
   Astro::Coord::ECI::TLE:
     file: lib/Astro/Coord/ECI/TLE.pm
-    version: 0.019
+    version: 0.020
   Astro::Coord::ECI::TLE::Iridium:
     file: lib/Astro/Coord/ECI/TLE/Iridium.pm
     version: 0.009
