@@ -31,7 +31,7 @@ tag gets you all of them.
  SECSPERDAY = the number of seconds in a day
  TWOPI = twice the circle ratio
 
-=head2 The following global variable is exportable:
+=head2 The following global variables are exportable:
 
 =head3 $DATETIMEFORMAT
 
@@ -67,7 +67,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.012';
+our $VERSION = '0.026_02';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -94,7 +94,8 @@ our @EXPORT_OK = qw{
 	find_first_true intensity_to_magnitude jcent2000 jd2date
 	jd2datetime jday2000 julianday load_module looks_like_number max
 	min mod2pi nutation_in_longitude nutation_in_obliquity obliquity
-	omega rad2deg tan theta0 thetag};
+	omega rad2deg tan theta0 thetag vector_cross_product
+	vector_dot_product vector_magnitude vector_unitize };
 
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
@@ -858,6 +859,187 @@ sub thetag {
 	    + (6.77070812713916e-06 - 4.5087296615715e-10 * $T) * $T * $T;
 }
 
+=item $a = vector_cross_product( $b, $c );
+
+This subroutine computes and returns the vector cross product of $b and
+$c. Vectors are represented by array references.  The cross product is
+only defined if both arrays have 3 elements.
+
+=cut
+
+sub vector_cross_product {
+    my ( $b, $c ) = @_;
+    @{ $b } == 3 and @{ $c } == 3
+	or confess 'Programming error - vector_cross_product arguments',
+	    ' must be references to arrays of length 3';
+    return [
+	$b->[1] * $c->[2] - $b->[2] * $c->[1],
+	$b->[2] * $c->[0] - $b->[0] * $c->[2],
+	$b->[0] * $c->[1] - $b->[1] * $c->[0],
+    ];
+}
+
+=item $a = vector_dot_product( $b, $c );
+
+This subroutine computes and returns the vector dot product of $b and
+$c. Vectors are represented by array references. The dot product is only
+defined if both arrays have the same number of elements.
+
+=cut
+
+sub vector_dot_product {
+    my ( $b, $c ) = @_;
+    @{ $b } == @{ $c }
+	or confess 'Programming error - vector_dot_product arguments ',
+	    'must be references to arrays of the same length';
+    my $prod = 0;
+    my $size = @{ $b } - 1;
+    foreach my $inx ( 0 .. $size ) {
+	$prod += $b->[$inx] * $c->[$inx];
+    }
+    return $prod;
+}
+
+=item $a = vector_magnitude( $b );
+
+This subroutine computes and returns the magnitude of vector $b. The
+vector is represented by an array reference.
+
+=cut
+
+sub vector_magnitude {
+    my ( $b ) = @_;
+    'ARRAY' eq ref $b
+	or confess 'Programming error - vector_magnitude argument ',
+    'must be a reference to an array';
+    my $mag = 0;
+    my $size = @{ $b } - 1;
+    foreach my $inx ( 0 .. $size ) {
+	$mag += $b->[$inx] * $b->[$inx];
+    }
+    return sqrt $mag;
+}
+
+=item $a = vector_unitize( $b );
+
+This subroutine computes and returns a unit vector pointing in the same
+direction as $b. The vectors are represented by array references.
+
+=cut
+
+sub vector_unitize {
+    my ( $b ) = @_;
+    'ARRAY' eq ref $b
+	or confess 'Programming error - vector_unitize argument ',
+    'must be a reference to an array';
+    my $mag = vector_magnitude( $b );
+    return [ map { $_ / $mag } @{ $b } ];
+}
+
+#	$epoch_time = _parse_time_iso_8601
+#
+#	Parse ISO 8601 date/time. I do not intend to expose this, since
+#	it will probably go away when the satpass script is dropped. It
+#	would actually be in that script except for the fact that it can
+#	be more easily tested here, and because of the possibility that
+#	it will be used in App::Satpass2.
+{
+
+    my %special_day_offset = (
+	yesterday => -SECSPERDAY(),
+	today => 0,
+	tomorrow => SECSPERDAY(),
+    );
+
+    sub _parse_time_iso_8601 {
+	my ( $string ) = @_;
+
+	my @zone;
+	$string =~ s/ \s* (?: ( Z ) |
+		( [+-] ) ( \d{2} ) :? ( \d{2} )? ) \z //smx
+	    and @zone = ( $1, $2, $3, $4 );
+	my @date;
+
+	# ISO 8601 date
+	if ( $string =~ m{ \A
+		( \d{4} \D? | \d{2} \D )			# year: $1
+		(?: ( \d{1,2} ) \D?				# month: $2
+		    (?: ( \d{1,2} ) (?: \s* | \D? )		# day: $3
+			(?: ( \d{1,2} ) \D?			# hour: $4
+			    (?: ( \d{1,2} ) \D?			# minute: $5
+				(?: ( \d{1,2} ) \D?		# second: $6
+				    ( \d* )			# fract: $7
+				)?
+			    )?
+			)?
+		    )?
+		)?
+		\z
+	    }smx ) {
+	    @date = ( $1, $2, $3, $4, $5, $6, $7, undef );
+
+	# special-case 'yesterday', 'today', and 'tomorrow'.
+	} elsif ( $string =~ m{ \A
+		( yesterday | today | tomorrow )	# day: $1
+		(?: \D* ( \d{1,2} ) \D?			# hour: $2
+		    (?: ( \d{1,2} ) \D?			# minute: $3
+			(?: ( \d{1,2} ) \D?		# second: $4
+			    ( \d* )			# fract: $5
+			)?
+		    )?
+		)?
+		\z }smx ) {
+	    my @today = @zone ? gmtime : localtime;
+	    @date = ( $today[5] + 1900, $today[4] + 1, $today[3], $2, $3,
+		$4, $5, $special_day_offset{$1} );
+
+	} else {
+
+	    return;
+
+	}
+
+
+	my $offset = pop @date || 0;
+	if ( @zone && !$zone[0] ) {
+	    my ( $zulu, $sign, $hr, $min ) = @zone;
+	    $offset -= $sign . ( ( $hr * 60 + ( $min || 0 ) ) * 60 )
+	}
+
+	foreach ( @date ) {
+	    defined $_ and s/ \D+ //smxg;
+	}
+
+	if ( $date[0] < 70 ) {
+	    $date[0] += 100;
+	} elsif ( $date[0] >= 100 ) {
+	    $date[0] -= 1900;
+	}
+	defined $date[1] and --$date[1];
+	defined $date[2] or $date[2] = 1;
+	my $frc = pop @date;
+
+	foreach ( @date ) {
+	    defined $_ or $_ = 0;
+	}
+
+	my $time;
+	if ( @zone ) {
+	    $time = timegm( reverse @date );
+	} else {
+	    $time = timelocal( reverse @date );
+	}
+
+	if ( defined $frc  && $frc ne '') {
+	    my $denom = 1 . ( 0 x length $frc );
+	    $time += $frc / $denom;
+	}
+
+	return $time + $offset;
+    }
+
+}
+
 1;
 
 __END__
@@ -880,19 +1062,18 @@ L<http://rt.cpan.org/>.
 
 Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
 
-Copyright 2005, 2006, 2007, 2008, 2009 by Thomas R. Wyant, III
-(F<wyant at cpan dot org>). All rights reserved.
+Copyright (C) 2005-2009, Thomas R. Wyant, III
 
-=head1 LICENSE
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl 5.10.0. For more details, see the full text
+of the licenses in the directory LICENSES.
 
-This module is free software; you can use it, redistribute it and/or
-modify it under the same terms as Perl itself. Please see
-L<http://perldoc.perl.org/index-licence.html> for the current licenses.
-
-This software is provided without any warranty of any kind, express or
-implied. The author will not be liable for any damages of any sort
-relating in any way to this software.
+This program is distributed in the hope that it will be useful, but
+without any warranty; without even the implied warranty of
+merchantability or fitness for a particular purpose.
 
 =cut
+
+# ex: set textwidth=72 :

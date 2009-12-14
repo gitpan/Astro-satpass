@@ -345,7 +345,7 @@ print <<eod;
 # In the following three tests the tolerance is degraded because the
 # book solution is calculated by http://www.satcom.co.uk/article.asp?article=1
 # which apparently assumes an exactly synchronous orbit. Their exact
-# altitude assuymption is undocumented, as is their algorithm. So the
+# altitude assumption is undocumented, as is their algorithm. So the
 # tests are really more of a sanity check.
 #
 eod
@@ -354,8 +354,10 @@ foreach ([GRS80 => 38, -80, 1, 0, -75, 35800,
 		timegm (0, 0, 5, 27, 7, 105),
 		45.682, 171.906, 37355.457],
 	) {
-    my ($elps, $olat, $olong, $oelev, $slat, $slong, $selev,
-	$time, $expalt, $expazm, $exprng) = @$_;
+    my ($elps, $olat, $olong, $oelev,
+	$slat, $slong, $selev,
+	$time,
+	$expalt, $expazm, $exprng) = @$_;
 print <<eod;
 # Debug - reference ellipsoid = '$elps'
 eod

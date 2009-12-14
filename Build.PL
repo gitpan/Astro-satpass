@@ -3,11 +3,12 @@ use 5.006;
 use strict;
 use warnings;
 
+use lib qw{ inc };
+
+use Astro::Coord::ECI::Build;
 use Module::Build;
 use Config;
 use FileHandle;
-
-our $VERSION = '0.010';
 
 (my $mbv = Module::Build->VERSION) =~ s/_//g;
 
@@ -21,9 +22,11 @@ my %attr = (
     get_options => {y => {}, n => {}},
     dynamic_config => 1,
     license => 'perl',
+    add_to_cleanup => [ qw{ xt/generated } ],
 );
 
 $mbv >= 0.08 and $attr{recommends} = {
+    'Date::Manip'	=> 1.14,
     'Time::y2038'	=> 20081111,
 };
 
@@ -39,7 +42,7 @@ $mbv >= 0.28 and $attr{meta_merge} = {
 $mbv >= 0.34
     and $attr{auto_configure_requires} = 0;	# Don't require Module::Build
 
-my $bldr = Module::Build->new (%attr);
+my $bldr = Astro::Coord::ECI::Build->new (%attr);
 
 my %opt = $bldr->args ();
 
@@ -84,7 +87,7 @@ if ($opt{n}) {
 my $stringmod = $] >= 5.008 ? '' : 'IO::String';
 
 if (@exe_files) {
-    push @prereq, 'Date::Manip' => 1.14;
+#   push @prereq, 'Date::Manip' => 1.14;
     foreach (['Astro::SIMBAD::Client' => 0, <<eod],
 Optional module Astro::SIMBAD::Client is needed if you wish to retrieve
 star positions directly from the SIMBAD catalog via the 'sky lookup'

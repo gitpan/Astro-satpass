@@ -1,3 +1,36 @@
+0.026_02	14-Dec-2009	T. R. Wyant
+  The Astro::Coord::ECI azel() method now returns velocities if
+    these are available. The transverse velocities (azimuthal and
+    elevational) are NOT corrected for the Coriolis effect.
+  Added Astro::Nova to the Astro::Coord::ECI 'SEE ALSO' section.
+  Date::Manip is no longer required. If it is not available, the
+    'satpass' script will use a home-grown pseudo-ISO-8601 parser
+    instead. The t/parse_time.t test was added to make sure this works
+    as advertized.
+  Have 'authortest' run the normal tests without any of the optional
+    modules. This requires either Test::Without::Module or Devel::Hide.
+    If neither is available, 'authortest' will not attempt these tests.
+  Remove the last vestiges of the $ENV{DEVELOPER_TEST} machinery.
+  Rewrote xt/manifest.t to use Test::More.
+
+------------------------------------------------------------------------
+
+0.026_01	28-Nov-2009	T. R. Wyant
+  All modules' versions set to 0.026_01. In the future all modules in
+    a given release will have the same version number.
+  Convert all modules to the CPAN-recommended license.
+  Author tests no longer rely on environment variable DEVELOPER_TEST.
+    Instead, they are executed by ./Build authortest. This means author
+    tests are no longer available via the ExtUtils::MakeMaker build.
+  Astro::Coord::ECI
+    Modify correct_for_refraction() to work down to (and a bit below)
+      the horizon setting if that is negative. Thanks to Vidar Tyldum
+      Hansen of Kongsberg Satellite Services AS for identifying the
+      need for this, and working with me on it.
+  satpass
+    Add the 'refraction' parameter, to allow the user to turn off
+      atmospheric refraction (it is on by default).
+  
 0.026 02-Oct-2009	T. R. Wyant
   Astro::Coord::ECI 0.026
     Default the {inertial} attribute appropriately.
