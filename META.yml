@@ -1,52 +1,52 @@
 ---
-name: Astro-satpass
-version: 0.026_02
+abstract: 'Classes and app to compute satellite visibility'
 author:
-  - Tom Wyant (wyant at cpan dot org)
-abstract: Classes and app to compute satellite visibility
-license: perl
-resources:
-  bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=Astro-satpass
-  license: http://dev.perl.org/licenses/
+  - 'Tom Wyant (wyant at cpan dot org)'
 build_requires:
   Test::More: 0.4
-requires:
-  Params::Util: 0.25
-  perl: 5.006
-recommends:
-  Date::Manip: 1.14
-  Time::y2038: 20081111
 dynamic_config: 1
-provides:
-  Astro::Coord::ECI:
-    file: lib/Astro/Coord/ECI.pm
-    version: 0.026_02
-  Astro::Coord::ECI::Moon:
-    file: lib/Astro/Coord/ECI/Moon.pm
-    version: 0.026_02
-  Astro::Coord::ECI::Star:
-    file: lib/Astro/Coord/ECI/Star.pm
-    version: 0.026_02
-  Astro::Coord::ECI::Sun:
-    file: lib/Astro/Coord/ECI/Sun.pm
-    version: 0.026_02
-  Astro::Coord::ECI::TLE:
-    file: lib/Astro/Coord/ECI/TLE.pm
-    version: 0.026_02
-  Astro::Coord::ECI::TLE::Iridium:
-    file: lib/Astro/Coord/ECI/TLE/Iridium.pm
-    version: 0.026_02
-  Astro::Coord::ECI::TLE::Set:
-    file: lib/Astro/Coord/ECI/TLE/Set.pm
-    version: 0.026_02
-  Astro::Coord::ECI::Utils:
-    file: lib/Astro/Coord/ECI/Utils.pm
-    version: 0.026_02
-generated_by: Module::Build version 0.35
+generated_by: 'Module::Build version 0.3601'
+license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
+name: Astro-satpass
 no_index:
   directory:
     - inc
     - t
+provides:
+  Astro::Coord::ECI:
+    file: lib/Astro/Coord/ECI.pm
+    version: 0.026_03
+  Astro::Coord::ECI::Moon:
+    file: lib/Astro/Coord/ECI/Moon.pm
+    version: 0.026_03
+  Astro::Coord::ECI::Star:
+    file: lib/Astro/Coord/ECI/Star.pm
+    version: 0.026_03
+  Astro::Coord::ECI::Sun:
+    file: lib/Astro/Coord/ECI/Sun.pm
+    version: 0.026_03
+  Astro::Coord::ECI::TLE:
+    file: lib/Astro/Coord/ECI/TLE.pm
+    version: 0.026_03
+  Astro::Coord::ECI::TLE::Iridium:
+    file: lib/Astro/Coord/ECI/TLE/Iridium.pm
+    version: 0.026_03
+  Astro::Coord::ECI::TLE::Set:
+    file: lib/Astro/Coord/ECI/TLE/Set.pm
+    version: 0.026_03
+  Astro::Coord::ECI::Utils:
+    file: lib/Astro/Coord/ECI/Utils.pm
+    version: 0.026_03
+recommends:
+  Date::Manip: 1.14
+  Time::y2038: 20081111
+requires:
+  Params::Util: 0.25
+  perl: 5.006
+resources:
+  bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=Astro-satpass
+  license: http://dev.perl.org/licenses/
+version: 0.026_03
