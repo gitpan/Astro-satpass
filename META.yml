@@ -18,28 +18,28 @@ no_index:
 provides:
   Astro::Coord::ECI:
     file: lib/Astro/Coord/ECI.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::Moon:
     file: lib/Astro/Coord/ECI/Moon.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::Star:
     file: lib/Astro/Coord/ECI/Star.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::Sun:
     file: lib/Astro/Coord/ECI/Sun.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::TLE:
     file: lib/Astro/Coord/ECI/TLE.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::TLE::Iridium:
     file: lib/Astro/Coord/ECI/TLE/Iridium.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::TLE::Set:
     file: lib/Astro/Coord/ECI/TLE/Set.pm
-    version: 0.026_03
+    version: 0.027
   Astro::Coord::ECI::Utils:
     file: lib/Astro/Coord/ECI/Utils.pm
-    version: 0.026_03
+    version: 0.027
 recommends:
   Date::Manip: 1.14
   Time::y2038: 20081111
@@ -49,4 +49,4 @@ requires:
 resources:
   bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=Astro-satpass
   license: http://dev.perl.org/licenses/
-version: 0.026_03
+version: 0.027
