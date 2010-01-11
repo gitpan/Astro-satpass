@@ -209,7 +209,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.027';
+our $VERSION = '0.028';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -1207,7 +1207,7 @@ eod
 		    if $debug;
 		foreach (sort {$a->[0] <=> $b->[0]} @time) {
 		    my @event = @$_;
-		    my ( $time, $evnt_name ) = @event;
+		    my ( $time, $evnt_name, @extra ) = @event;
 		    ($suntim, $rise) =
 			$sta->universal ($time)->next_elevation ($sun,
 			    $twilight)
@@ -1227,6 +1227,7 @@ eod
 			range => $rng,
 			station => $sta,
 			time => $time,
+			@extra,
 		    };
 		}
 
