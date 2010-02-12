@@ -83,7 +83,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.029_02';
+our $VERSION = '0.029_03';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -3061,6 +3061,9 @@ SLALIB from L<http://www.starlink.rl.ac.uk/Software/software_store.htm>.
 The L<Astro::Nova|Astro::Nova> module by Steffen Mueller, which wraps
 (and bundles) the libnova celestial mechanics, astrometry and
 astrodynamics library found at L<http://libnova.sourceforge.net/>.
+
+The L<http://www.heavens-above.com/> web site, which does B<not> use
+this code, but does provide similar functionality.
 
 =head1 AUTHOR
 
