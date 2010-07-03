@@ -96,17 +96,14 @@ should use the C<ascendingnode> attribute instead.
 
 Currently, C<rightascension> and C<ascendingnode> are equivalent.
 
-As scheduled, with this release a warning is generated the first time
+As scheduled, with this release a warning is generated every time
 the C<rightascension> attribute is used. This warning can be suppressed
 by asserting C<< no warnings qw{ deprecated }; >> at the point the
 warning is issued. But you really should convert the warning code to use
 the C<ascendingnode> attribute.
 
-At the first release after June 30 2010 there will be a warning
-generated every time the C<rightascension> attribute is used.
-
-At the first release in 2011 (or the second release after June 30 2010,
-whichever is later), the C<rightascension> attribute will disappear.
+At the first release in 2011 the C<rightascension> attribute will
+disappear.
 
 =head1 DESCRIPTION
 
@@ -209,7 +206,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.031';
+our $VERSION = '0.032';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -223,6 +220,12 @@ use IO::File;
 use Params::Util 0.25 qw{_CLASSISA _INSTANCE};
 use POSIX qw{floor fmod strftime};
 
+BEGIN {
+    local $@;
+    eval {require Scalar::Util; Scalar::Util->import ('dualvar'); 1}
+	or *dualvar = sub {$_[0]};
+}
+
 {	# Local symbol block.
     my @const = qw{
 	PASS_EVENT_NONE
@@ -233,6 +236,10 @@ use POSIX qw{floor fmod strftime};
 	PASS_EVENT_MAX
 	PASS_EVENT_SET
 	PASS_EVENT_APPULSE
+	BODY_TYPE_UNKNOWN
+	BODY_TYPE_DEBRIS
+	BODY_TYPE_ROCKET_BODY
+	BODY_TYPE_PAYLOAD
     };
     our @EXPORT_OK = @const;
     our %EXPORT_TAGS = (
@@ -312,7 +319,6 @@ use constant SGP_RHO => .15696615;
 #		must make the needed changes to the attribute, and
 #		return 0 or 1, interpreted as above.
 
-my $rightascension_deprecated = 0;	## TODO get rid of this
 my %attrib = (
     backdate => 0,
     effective => sub {
@@ -353,8 +359,7 @@ eod
     },
     model_error => 0,
     rightascension => sub {
-	$rightascension_deprecated++
-	    or warnings::warnif(
+	warnings::warnif(
 	    deprecated =>
 	    'The Astro::Coord::ECI::TLE rightascension attribute is deprecated. Use ascendingnode instead',
 	);
@@ -533,6 +538,76 @@ At this level it does nothing.
 
 sub before_reblessing {}
 
+=item $type = $tle->body_type ()
+
+This method returns the type of the body as one of the BODY_TYPE_*
+constants. This is derived from the common name using an algorithm
+similar to the one used by the Space Track web site. This algorithm will
+not work if the common name is not available, or if it does not conform
+to the Space Track naming conventions. Known or suspected differences
+from the algorithm described at the bottom of the Satellite Box Score
+page include:
+
+* The C<Astro::Coord::ECI::TLE> algorithm is not case-sensitive. The
+Space Track algorithm appears to assume all upper-case.
+
+* The C<Astro::Coord::ECI::TLE> algorithm looks for words (that is,
+alphanumeric strings delimited by non-alphanumeric characters), whereas
+the Space Track documentation seems to say it just looks for substrings.
+However, implementing the documented algorithm literally results in OID
+20479 'DEBUT (ORIZURU)' being classified as debris, whereas Space Track
+returns it in response to a query for name 'deb' that excludes debris.
+
+The possible returns are:
+
+C<< BODY_TYPE_UNKNOWN => dualvar( 0, 'unknown' ) >> if the value of the
+C<name> attribute is C<undef>, or if it is empty or contains only
+white space.
+
+C<< BODY_TYPE_DEBRIS => dualvar( 1, 'debris' ) >> if the value of the
+C<name> attribute contains one of the words 'deb', 'debris', 'coolant',
+'shroud', or 'westford needles', all checks being case-insensitive.
+
+C<< BODY_TYPE_ROCKET_BODY => dualvar( 2, 'rocket body' ) >> if the body
+is not debris, but the value of the C<name> attribute contains one of
+the strings 'r/b', 'akm' (for 'apogee kick motor') or 'pkm' (for
+'perigee kick motor') all checks being case-insensitive.
+
+C<< BODY_TYPE_PAYLOAD => dualvar( 3, 'payload' ) >> if the body is not
+unknown, debris, or a rocket body.
+
+The above constants are not exported by default, but they are exportable
+either by name or using the C<:constants> tag.
+
+If L<Scalar::Util|Scalar::Util> does not export C<dualvar()>, the
+constants are defined to be numeric. The cautious programmer will
+therefore test them using numeric tests.
+
+=cut
+
+use constant BODY_TYPE_UNKNOWN => dualvar( 0, 'unknown' );
+use constant BODY_TYPE_DEBRIS => dualvar( 1, 'debris' );
+use constant BODY_TYPE_ROCKET_BODY => dualvar( 2, 'rocket body' );
+use constant BODY_TYPE_PAYLOAD => dualvar( 3, 'payload' );
+
+sub body_type {
+    my ( $self ) = @_;
+    defined( my $name = $self->get( 'name' ) )
+	or return BODY_TYPE_UNKNOWN;
+    $name =~ m/ \A \s* \z /smx
+	and return BODY_TYPE_UNKNOWN;
+    ( $name =~ m/ \b deb \b /smxi
+	|| $name =~ m/ \b debris \b /smxi
+	|| $name =~ m/ \b coolant \b /smxi
+	|| $name =~ m/ \b shroud \b /smxi
+	|| $name =~ m/ \b westford \s+ needles \b /smxi )
+	and return BODY_TYPE_DEBRIS;
+    ( $name =~ m{ \b r/b \b }smxi
+	|| $name =~ m/ \b [ap] km \b /smxi )
+	and return BODY_TYPE_ROCKET_BODY;
+    return BODY_TYPE_PAYLOAD;
+}
+
 
 =item $tle->can_flare ()
 
@@ -592,8 +667,7 @@ L</Attributes> section for a description of the attributes.
 {
     my %accessor = (
 	rightascension => sub {
-	    $rightascension_deprecated++
-		or warnings::warnif(
+	    warnings::warnif(
 		deprecated =>
 		'The Astro::Coord::ECI::TLE rightascension attribute is deprecated. Use ascendingnode instead',
 	    );
@@ -652,7 +726,10 @@ Actually, in the spirit of UNIVERSAL::can, it returns a reference to
 the code if the model exists, and undef otherwise.
 
 This is really for the benefit of Astro::Coord::ECI::TLE::Set, so it
-can select the correct member object before running the model.
+knows it needs to select the correct member object before running the
+model.
+
+This method can be called as a static method, or even as a subroutine.
 
 =cut
 
@@ -990,12 +1067,6 @@ the object:
   * visible	# Pass() reports only illuminated passes
 
 =cut
-
-BEGIN {
-    local $@;
-    eval {require Scalar::Util; Scalar::Util->import ('dualvar'); 1}
-	or *dualvar = sub {$_[0]};
-}
 
 use constant PASS_EVENT_NONE => dualvar (0, '');	# Guaranteed false.
 use constant PASS_EVENT_SHADOWED => dualvar (1, 'shdw');
@@ -3280,6 +3351,7 @@ sub time_set {
     $self->$model ($self->universal);
     return;
 }
+
 
 
 #######################################################################

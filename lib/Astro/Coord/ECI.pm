@@ -83,7 +83,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.031';
+our $VERSION = '0.032';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -3150,6 +3150,10 @@ due to him.
 
 Dr. Meeus' publisher, Willmann-Bell Inc (L<http://www.willbell.com/>),
 which kindly and patiently answered my intellectual-property questions.
+
+Goran Gasparovic of MIT, who asked for (and supplied information for)
+the ability to display results in apparent equatorial coordinates,
+rather than azimuth and elevation.
 
 =head1 BUGS
 

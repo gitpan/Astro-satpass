@@ -40,7 +40,7 @@ my $xml_parser;
 #	Initialization
 #
 
-our $VERSION = '0.031';
+our $VERSION = '0.032';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -419,7 +419,13 @@ eod
 
 #	Do pseudo tilde expansion.
 
-    $redout =~ s/^(>+)(~.*)/ $1 . _tilde_expand ($2) /e;
+    eval {
+	$redout =~ s/^(>+)(~.*)/ $1 . _tilde_expand ($2) /e;
+	1;
+    } or do {
+	warn $@;
+	next;
+    };
 
 #	Special-case 'exit' to drop out of the input loop.
 
@@ -2644,7 +2650,7 @@ _display_timing ();
 
 sub _get_equatorial_coordinates {
     if (my $equinox = $parm{desired_equinox_dynamical}) {
-	$_[0]->universal ($_[1]->universal);
+	@_ > 1 and $_[0]->universal( $_[1]->universal );
 	@_ = map {$_->clone ()->precess_dynamical ($equinox)} @_;
     }
     my $station = shift;
@@ -5724,10 +5730,6 @@ For prior changes, see F<Changes>.
 L<Astro::Coord::ECI> acknowledges those without whom this code would not
 exist. But the script has its own issues, and I would like to
 acknowledge here those who made this script better:
-
-Goran Gasparovic of MIT, who asked for (and supplied information for)
-the ability to display results in apparent equatorial coordinates,
-rather than azimuth and elevation.
 
 Imacat of Tavern IMACAT in Taiwan, for helping me to work out a satpass
 script testing problem.

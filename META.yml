@@ -15,35 +15,36 @@ no_index:
   directory:
     - inc
     - t
+    - xt
 provides:
   Astro::Coord::ECI:
     file: lib/Astro/Coord/ECI.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::Moon:
     file: lib/Astro/Coord/ECI/Moon.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::Star:
     file: lib/Astro/Coord/ECI/Star.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::Sun:
     file: lib/Astro/Coord/ECI/Sun.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::TLE:
     file: lib/Astro/Coord/ECI/TLE.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::TLE::Iridium:
     file: lib/Astro/Coord/ECI/TLE/Iridium.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::TLE::Set:
     file: lib/Astro/Coord/ECI/TLE/Set.pm
-    version: 0.031
+    version: 0.032
   Astro::Coord::ECI::Utils:
     file: lib/Astro/Coord/ECI/Utils.pm
-    version: 0.031
+    version: 0.032
 requires:
   Params::Util: 0.25
   perl: 5.006
 resources:
   bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=Astro-satpass
   license: http://dev.perl.org/licenses/
-version: 0.031
+version: 0.032
