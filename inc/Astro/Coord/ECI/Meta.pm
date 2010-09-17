@@ -1,6 +1,6 @@
 package Astro::Coord::ECI::Meta;
 
-use 5.006;
+use 5.006002;
 
 use strict;
 use warnings;
@@ -26,14 +26,22 @@ sub requires {
     my ( $self, @extra ) = @_;
 ##  if ( ! $self->distribution() ) {
 ##  }
-    return {
-	'Params::Util'	=> 0.25,
+    return +{
+	'Carp'		=> 0,
+	'Data::Dumper'	=> 0,
+	'Exporter'	=> 5.64,
+	'IO::File'	=> 0,
+	'POSIX'		=> 0,
+	'Scalar::Util'	=> 0,
+	'constant'	=> 0,
+	'strict'	=> 0,
+	'warnings'	=> 0,
 	@extra,
     };
 }
 
 sub requires_perl {
-    return 5.006;
+    return 5.006002;
 }
 
 

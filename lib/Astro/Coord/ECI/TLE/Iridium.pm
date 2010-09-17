@@ -27,7 +27,7 @@ will need to substitute your own location where indicated.
     deg2rad ($your_east_longitude_in_degrees),
     $your_height_above_sea_level_in_meters/1000);
  
- # Get all the Iridium data from Celestrak; it is direct-
+ # Get all the Iridium data from CelesTrak; it is direct-
  # fetched, so no password is needed.
  
  my $st = Astro::SpaceTrack->new (direct => 1);
@@ -102,9 +102,9 @@ as follows:
  1 => spare (may or may not flare)
  2 => failed - no predictable flares.
 
-Celestrak-style statuses ('+', 'S', and '-' respectively) are accepted
-on input. See L<Astro::SpaceTrack> method iridium_status for a way to
-get current Iridium constellation status.
+CelesTrak-style statuses ('+', 'S', and '-' respectively) are accepted
+on input. See L<Astro::SpaceTrack|Astro::SpaceTrack> method
+iridium_status for a way to get current Iridium constellation status.
 
 =head2 Methods
 
@@ -121,12 +121,11 @@ use warnings;
 
 use base qw{Astro::Coord::ECI::TLE};
 
-our $VERSION = '0.032';
+our $VERSION = '0.033';
 
 use Astro::Coord::ECI::Sun;
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
-use Params::Util 0.25 qw{_INSTANCE};
 use POSIX qw{floor strftime};	# For debugging
 
 use constant ATTRIBUTE_KEY => '_sub_TLE_Iridium';
@@ -420,7 +419,7 @@ says are spares. I have skipped the spares by default because I do not
 know that their attitudes are maintained to the requisite precision,
 though perhaps they would be, to demonstrate that the spares are
 functional. This software currently uses the Iridium status from
-Celestrak (L<http://celestrak.com/SpaceTrack/query/iridium.txt>), since
+CelesTrak (L<http://celestrak.com/SpaceTrack/query/iridium.txt>), since
 it represents one-stop shopping, and Dr. Kelso has expressed the intent
 to check with Iridium Satellite LLC monthly for status. Mike McCants'
 "Status of Iridium Payloads" at
@@ -488,7 +487,7 @@ sub _flare_fixed {
     my $station = shift;
     {
 	local $@;
-	_INSTANCE($station, 'Astro::Coord::ECI') or croak <<eod;
+	_instance( $station, 'Astro::Coord::ECI' ) or croak <<eod;
 Error - The station must be a subclass of Astro::Coord::ECI.
 eod
     }
@@ -679,6 +678,7 @@ eod
 
 #	Now iterate over each MMA to calculate its flare, if any.
 
+MMA_LOOP:
 	foreach my $mma (0 .. 2) {
 
 
@@ -762,6 +762,7 @@ eod
 
 		my $angle = _flare_calculate_angle_list ($tle_vector,
 		    $mma, $illum_vector, $station_vector);
+		defined $angle or next MMA_LOOP;
 
 
 #	Store the data in our approximation list, in order by angle.

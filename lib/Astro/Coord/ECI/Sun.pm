@@ -50,13 +50,12 @@ package Astro::Coord::ECI::Sun;
 use strict;
 use warnings;
 
-our $VERSION = '0.032';
+our $VERSION = '0.033';
 
 use base qw{Astro::Coord::ECI};
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
-use Params::Util 0.25 qw{_CLASSISA};
 use POSIX qw{floor strftime};
 
 my %static = (
@@ -98,7 +97,7 @@ otherwise.
 sub new {
     my ($class, @args) = @_;
     ref $class and $class = ref $class;
-    if ($Singleton && $weaken && _CLASSISA($class, __PACKAGE__)) {
+    if ( $Singleton && $weaken && _classisa( $class, __PACKAGE__ ) ) {
 	if ($object) {
 	    $object->set (@args) if @args;
 	    return $object;

@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use 5.006;
+use 5.006002;
 
 use Astro::Coord::ECI;
 use Astro::Coord::ECI::TLE qw{ :constants };
@@ -15,7 +15,7 @@ use Pod::Usage;
 use POSIX qw{ strftime };
 use Time::Local;
 
-our $VERSION = '0.032';
+our $VERSION = '0.033';
 
 # Map -want-events values to TLE event codes.
 my %wanted_event_map = (

@@ -57,7 +57,7 @@ Brodowski
 bstardrag
 CA
 ca
-Celestrak
+CelesTrak
 Chalpront
 cmd
 Coord
@@ -189,6 +189,7 @@ pre
 psiprime
 rad
 Ramon
+rcs
 readonly
 rebless
 reblessable

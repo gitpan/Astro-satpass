@@ -206,18 +206,17 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.032';
+our $VERSION = '0.033';
 
 use base qw{Astro::Coord::ECI Exporter};
 
-use Astro::Coord::ECI::Utils qw{ deg2rad dynamical_delta embodies
-    find_first_true load_module max mod2pi PI PIOVER2 rad2deg SECSPERDAY
-    TWOPI thetag :time };
+use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
+    embodies find_first_true load_module max mod2pi PI PIOVER2 rad2deg
+    SECSPERDAY TWOPI thetag };
 
 use Carp qw{carp croak confess};
 use Data::Dumper;
 use IO::File;
-use Params::Util 0.25 qw{_CLASSISA _INSTANCE};
 use POSIX qw{floor fmod strftime};
 
 BEGIN {
@@ -329,6 +328,7 @@ my %attrib = (
 		(($2 - 1) * 24 + $3) * 60 + $4) * 60 + $5;
 	}
 	$self->{$name} = $value;
+	return 0;
     },
     classification => 0,
     international => 0,
@@ -382,6 +382,7 @@ eod
     interval => 0,	# Interval for pass() positions, if positive.
     ds50 => undef,	# Read-only
     epoch_dynamical => undef,	# Read-only
+    rcs => 0,		# Radar cross-section
     tle => undef,	# Read-only
     illum => \&_set_illum,
     reblessable => sub {
@@ -882,6 +883,13 @@ external format. Internal format (denoted by a 'G' in column 79 of line
 1 of the set, not counting the common name if any) is not supported,
 and the presence of such data will result in an exception being thrown.
 
+There are two pieces of ad-hoc data that will be parsed from the name
+portion of a NASA TLE and put into the appropriate attribute:
+C<< --effective effective_date >> and C<< --rcs radar_cross_section >>.
+These go in the C<effective> and C<rcs> attributes, respectively. If,
+after removing these ad-hoc entries, the name is the empty string, the
+body is considered not to have a name.
+
 =cut
 
 sub parse {
@@ -906,10 +914,14 @@ eod
 	$line =~ s/\s+$//;
 	my $tle = "$line\n";
 	$line =~ m{ \A 1 (\s* \d+) }smx and length $1 == 6 or do {
-	    if ($line =~ s{ \s* --effective \s+ (\S+) }{}smx) {
-		$ele{effective} = $1;
+	    my %adhoc;
+	    $line =~ s{ \s* -- ( [-\w]+ ) \s+ ( \S+ ) }
+		{ _parse_adhoc( \%adhoc, $1, $2 ) }smxge;
+	    foreach my $name ( qw{ effective rcs } ) {
+		exists $adhoc{$name}
+		    and $ele{$name} = delete $adhoc{$name};
 	    }
-	    $line and $ele{name} = $line;
+	    $line ne '' and $ele{name} = $line;
 	    $line = shift @data;
 	    $tle .= "$line\n";
 	};
@@ -968,6 +980,12 @@ eod
 	push @rslt, $body;
     }
     return @rslt;
+}
+
+sub _parse_adhoc {
+    my ( $hash, $name, $value ) = @_;
+    $hash->{$name} = $value;
+    return '';
 }
 
 # Parse information for the above from
@@ -1551,7 +1569,7 @@ It does not under any circumstances manufacture another object.
 
 sub rebless {
     my ($tle, @args) = @_;
-    _INSTANCE($tle, __PACKAGE__) or croak <<eod;
+    _instance( $tle, __PACKAGE__ ) or croak <<eod;
 Error - You can only rebless an object of class @{[__PACKAGE__]}
         or a subclass thereof. The object you are trying to rebless
 	is of class @{[ref $tle]}.
@@ -1566,7 +1584,7 @@ eod
 	or return $tle;
     $class = $type_map{$class} if $type_map{$class};
     load_module ($class);
-    _CLASSISA($class, __PACKAGE__) or croak <<eod;
+    _classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - You can only rebless an object into @{[__PACKAGE__]} or
         a subclass thereof. You are trying to rebless the object
 	into $class.
@@ -1726,7 +1744,7 @@ eod
 Error - The status (add => $id) call requires a type.
 eod
 	my $class = $type_map{$type} || $type;
-	_CLASSISA($class, __PACKAGE__) or croak <<eod;
+	_classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - $type must specify a subclass of @{[__PACKAGE__]}.
 eod
 	my $status = shift || 0;
@@ -1749,7 +1767,7 @@ eod
 	    %status = ();
 	} else {
 	    my $class = $type_map{$type} || $type;
-	    _CLASSISA($class, __PACKAGE__) or croak <<eod;
+	    _classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - $type must specify a subclass of @{[__PACKAGE__]}.
 eod
 	    foreach my $key (keys %status) {
@@ -6457,85 +6475,103 @@ sub _initial_inertial{ return 1 };
 #	a TLE in the case where $self->get('tle') was called but the
 #	object was not initialized by the parse() method.
 
-sub _make_tle {
-    my $self = shift;
-    my $output;
+{
 
-    my $oid = $self->get('id');
-    my @line0;
+    my %hack = (
+	effective => sub {
+	    my ( $self, $name, $value ) = @_;
+	    my $whole = floor($value);
+	    my ($sec, $min, $hr, undef, undef, $year, undef, $yday) =
+		gmtime $value;
+	    return (
+		'--effective',
+		sprintf '%04d/%03d/%02d:%02d:%06.3f',
+		$year + 1900, $yday + 1, $hr, $min,
+		$sec + ($value - $whole)
+	    );
+	},
+	rcs => sub {
+	    my ( $self, $name, $value ) = @_;
+	    return ( '--rcs', $value );
+	},
+    );
 
-    {
-	my $name;
-	defined ($name = $self->get('name'))
-	    and $name ne ''
-	    and push @line0, substr $name, 0, 24;
-    }
+    sub _make_tle {
+	my $self = shift;
+	my $output;
 
-    if (defined (my $effective = $self->get('effective'))) {
-	my $whole = floor($effective);
-	my ($sec, $min, $hr, undef, undef, $year, undef, $yday) =
-	    gmtime $effective;
-	push @line0, sprintf '--effective %04d/%03d/%02d:%02d:%06.3f',
-	    $year + 1900, $yday + 1, $hr, $min,
-	    $sec + ($effective - $whole);
-    }
-    @line0 and $output .= join (' ', @line0) . "\n";
+	my $oid = $self->get('id');
+	my @line0;
 
-    my %ele;
-    {
-	foreach (qw{firstderivative secondderivative bstardrag
-	    inclination ascendingnode eccentricity
-	    argumentofperigee meananomaly meanmotion
-	    revolutionsatepoch}) {
-	    defined ($ele{$_} = $self->get($_))
-		or croak "OID $oid ", ucfirst $_,
-		    "undefined; can not generate TLE";
+	{
+	    my $name;
+	    defined ($name = $self->get('name'))
+		and $name ne ''
+		and push @line0, substr $name, 0, 24;
 	}
-	my $temp = SGP_TWOPI;
-	foreach (qw{meanmotion firstderivative secondderivative}) {
-	    $temp /= SGP_XMNPDA;
-	    $ele{$_} /= $temp;
+
+	foreach my $name ( sort keys %hack ) {
+	    defined( my $value = $self->get( $name ) ) or next;
+	    push @line0, $hack{$name}->( $self, $name, $value );
 	}
-	foreach (qw{ascendingnode argumentofperigee meananomaly
-		    inclination}) {
-	    $ele{$_} /= SGP_DE2RA;
-	}
-	foreach my $key (qw{eccentricity}) {
-	    local $_ = sprintf '%.7f', $ele{$key};
-	    s/.*?\.//;
-	    $ele{$key} = $_;
-	}
-	my $epoch = $self->get('epoch');
-	my $epoch_dayfrac = sprintf '%.8f', ($epoch / SECSPERDAY);
-	$epoch_dayfrac =~ s/.*?\././;
-	my $epoch_daynum = strftime '%y%j', gmtime ($epoch);
-	$ele{epoch} = $epoch_daynum . $epoch_dayfrac;
-	$ele{firstderivative} = sprintf (
-	    '%.8f', $ele{firstderivative});
-	$ele{firstderivative} =~ s/([-+]?)[\s0]*\./$1./;
-	foreach my $key (qw{secondderivative bstardrag}) {
-	    if ($ele{$key}) {
-		local $_ = sprintf '%.4e', $ele{$key};
-		s/\.//;
-		my ($mantissa, $exponent) = split 'e', $_;
-		$exponent++;
-		$ele{$key} = sprintf '%s%+1d', $mantissa, $exponent;
-	    } else {
-		$ele{$key} = '00000-0';
+	@line0 and $output .= join (' ', @line0) . "\n";
+
+	my %ele;
+	{
+	    foreach (qw{firstderivative secondderivative bstardrag
+		inclination ascendingnode eccentricity
+		argumentofperigee meananomaly meanmotion
+		revolutionsatepoch}) {
+		defined ($ele{$_} = $self->get($_))
+		    or croak "OID $oid ", ucfirst $_,
+			"undefined; can not generate TLE";
+	    }
+	    my $temp = SGP_TWOPI;
+	    foreach (qw{meanmotion firstderivative secondderivative}) {
+		$temp /= SGP_XMNPDA;
+		$ele{$_} /= $temp;
+	    }
+	    foreach (qw{ascendingnode argumentofperigee meananomaly
+			inclination}) {
+		$ele{$_} /= SGP_DE2RA;
+	    }
+	    foreach my $key (qw{eccentricity}) {
+		local $_ = sprintf '%.7f', $ele{$key};
+		s/.*?\.//;
+		$ele{$key} = $_;
+	    }
+	    my $epoch = $self->get('epoch');
+	    my $epoch_dayfrac = sprintf '%.8f', ($epoch / SECSPERDAY);
+	    $epoch_dayfrac =~ s/.*?\././;
+	    my $epoch_daynum = strftime '%y%j', gmtime ($epoch);
+	    $ele{epoch} = $epoch_daynum . $epoch_dayfrac;
+	    $ele{firstderivative} = sprintf (
+		'%.8f', $ele{firstderivative});
+	    $ele{firstderivative} =~ s/([-+]?)[\s0]*\./$1./;
+	    foreach my $key (qw{secondderivative bstardrag}) {
+		if ($ele{$key}) {
+		    local $_ = sprintf '%.4e', $ele{$key};
+		    s/\.//;
+		    my ($mantissa, $exponent) = split 'e', $_;
+		    $exponent++;
+		    $ele{$key} = sprintf '%s%+1d', $mantissa, $exponent;
+		} else {
+		    $ele{$key} = '00000-0';
+		}
 	    }
 	}
+	$output .= _make_tle_checksum ('1%6s%s %-8s %-14s %10s %8s %8s %s %4s',
+	    $oid, $self->get('classification'),
+	    $self->get('international'),
+	    @ele{qw{epoch firstderivative secondderivative bstardrag}},
+	    $self->get('ephemeristype'), $self->get('elementnumber'),
+	);
+	$output .= _make_tle_checksum ('2%6s%9.4f%9.4f %-7s%9.4f%9.4f%12.8f%5s',
+	    $oid, @ele{qw{inclination ascendingnode eccentricity
+		argumentofperigee meananomaly meanmotion revolutionsatepoch}},
+	);
+	return $output;
     }
-    $output .= _make_tle_checksum ('1%6s%s %-8s %-14s %10s %8s %8s %s %4s',
-	$oid, $self->get('classification'),
-	$self->get('international'),
-	@ele{qw{epoch firstderivative secondderivative bstardrag}},
-	$self->get('ephemeristype'), $self->get('elementnumber'),
-    );
-    $output .= _make_tle_checksum ('2%6s%9.4f%9.4f %-7s%9.4f%9.4f%12.8f%5s',
-	$oid, @ele{qw{inclination ascendingnode eccentricity
-	    argumentofperigee meananomaly meanmotion revolutionsatepoch}},
-    );
-    return $output;
 }
 
 #	$output = _make_tle_checksum($fmt ...);
@@ -7404,6 +7440,14 @@ Setting the L<epoch|/item_epoch> also modifies this attribute.
 This attribute contains the orbital eccentricity, with the
 implied decimal point inserted.
 
+=item effective (numeric, parse)
+
+This attribute contains the effective date of the TLE, as a Perl time in
+seconds since the epoch. As a convenience, it can be set in the format
+used by NASA to specify this, as year/day/hour:minute:second, where all
+fields are numeric, and the day is the day number of the year, January 1
+being 1, and December 31 being either 365 or 366.
+
 =item elementnumber (numeric, parse)
 
 This attribute contains the element set number of the data set. In
@@ -7558,6 +7602,11 @@ The default is undef.
 
 This attribute contains the common name of the body.
 
+=item rcs (string, parse)
+
+This attribute represents the radar cross-section of the body, in square
+meters.
+
 =item reblessable (boolean)
 
 This attribute says whether the rebless() method is allowed to rebless
@@ -7627,6 +7676,10 @@ Kelso's Two-Line Element Set Format FAQ
 was his discussion of the coordinate system used
 (L<http://celestrak.com/columns/v02n01/>) and (indirectly) his Pascal
 implementation of these models.
+
+The file F<t/sgp4-ver.tle>, used in testing the C<sgp4r> model, is from
+"Revisiting Spacetrack Report #3" (made available at the CelesTrak web
+site as cited above), and is used with the kind permission of Dr. Kelso.
 
 =head1 SEE ALSO
 

@@ -5,7 +5,7 @@ use warnings;
 
 use Astro::Coord::ECI;
 use Astro::Coord::ECI::Moon;
-use Astro::Coord::ECI::Utils qw{ deg2rad PI :time };
+use Astro::Coord::ECI::Utils qw{ :time deg2rad PI };
 use POSIX qw{strftime floor};
 use Test;
 
@@ -144,7 +144,7 @@ eod
 
 {	# Local symbol block.
     my $skip;
-    eval {
+    eval {	## no critic (RequireCheckingReturnValueOfEval)
 	local $@;
 	$skip = "Can not load Scalar::Util.";
 	require Scalar::Util;

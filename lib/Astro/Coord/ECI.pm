@@ -83,12 +83,11 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.032';
+our $VERSION = '0.033';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
 use Data::Dumper;
-use Params::Util 0.25 qw{_CLASSISA};
 use POSIX qw{floor strftime};
 
 use constant AZEL_ROTATION => TWOPI / SECS_PER_SIDERIAL_DAY;
@@ -806,7 +805,7 @@ eod
 =item $coord = $coord->ecliptic ($latitude, $longitude, $range, $time);
 
 This method sets the L</Ecliptic> coordinates represented by the object
-in terms of L</Ecliptic latitude> and L<Ecliptic longitude> in radians,
+in terms of L</Ecliptic latitude> and L</Ecliptic longitude> in radians,
 and the range to the object in kilometers, time being universal time.
 The object itself is returned.
 
@@ -913,7 +912,7 @@ eod
 =item $coord->equatorial ($rightasc, $declin, $range, $time);
 
 This method sets the L</Equatorial> coordinates represented by the
-object in terms of L<Right Ascension> and L</Declination> in radians,
+object in terms of L</Right Ascension> and L</Declination> in radians,
 and the range to the object in kilometers, time being universal
 time. The object itself is returned.
 
@@ -2270,7 +2269,7 @@ There. This took many more words to explain than it did to implement.
 sub represents {
     return defined ($_[1]) ?
 ##	$_[0]->represents()->isa($_[1]) :
-	_CLASSISA($_[0]->represents(), $_[1]) ? 1 : 0 :
+	_classisa($_[0]->represents(), $_[1]) ? 1 : 0 :
 	(ref $_[0] || $_[0]);
 }
 
