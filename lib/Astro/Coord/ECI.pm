@@ -83,7 +83,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.033_01';
+our $VERSION = '0.034';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -845,6 +845,7 @@ sub ecliptic {
     unless (@args) {
 	return @{$self->{_ECI_cache}{inertial}{ecliptic}}
 	    if $self->{_ECI_cache}{inertial}{ecliptic};
+
 	my ($alpha, $delta, $rho) = $self->equatorial ();
 
 	my $epsilon = obliquity ($self->dynamical);
@@ -859,8 +860,10 @@ sub ecliptic {
 	my $beta = asin ($sindelta * $cosepsilon -		# Meeus (13.2), 
 	    $cosdelta * $sinepsilon * $sinalpha);		#     pg 93.
 
-	return @{$self->{_ECI_cache}{inertial}{ecliptic} =
-	    [$beta, $lambda, $rho]};
+	$self->{_ECI_cache}{inertial}{ecliptic} =
+	    [$beta, $lambda, $rho];
+
+	return @{$self->{_ECI_cache}{inertial}{ecliptic}}
     }
 
     if (@args == 3) {
