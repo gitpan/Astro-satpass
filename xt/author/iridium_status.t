@@ -31,7 +31,7 @@ my %mth;
 my $fail = 0;
 my $test = 0;
 my $ua = LWP::UserAgent->new ();
-my $asof = timegm (0, 0, 0, 3, 11, 110);
+my $asof = timegm (0, 0, 0, 7, 0, 111);
 
 foreach (["Mike McCants' Iridium status",
 	'http://www.io.com/~mmccants/tles/iridium.html',
@@ -168,7 +168,7 @@ eod
 24903IRIDIUM 26 [+]
 24904IRIDIUM 25 [+]
 24905IRIDIUM 46 [+]
-24906IRIDIUM 23 [+]
+24906IRIDIUM 23 [S]
 24907IRIDIUM 22 [+]
 24925DUMMY MASS 1 [-]
 24926DUMMY MASS 2 [-]
@@ -231,7 +231,7 @@ eod
 25530IRIDIUM 84 [+]
 25531IRIDIUM 83 [+]
 25577IRIDIUM 20 [+]
-25578IRIDIUM 11 [S]
+25578IRIDIUM 11 [+]
 25777IRIDIUM 14 [S]
 25778IRIDIUM 21 [+]
 27372IRIDIUM 91 [+]
@@ -259,7 +259,7 @@ content="text/html; charset=iso-8859-1">
 
 <h1 align="center">Iridium Constellation Status</h1>
 
-<p align="center"><strong>** Updated November 13, 2010**</strong></p>
+<p align="center"><strong>** Updated December 29, 2010**</strong></p>
 
 <p align="left">For a summary of the Iridium launch sequence, see
 my <a href="iridium_launch.htm">Iridium Launch Chronology</a>.
@@ -273,7 +273,10 @@ changes): </p>
 1998-074A, but currently labelled by Space-Track as 25578,
 1998-074B), previously spare, was raised to the operational
 orbit, just a few seconds behind Iridium 23 (24906, 1997-043D).
-This suggests that Iridium 23 must have failed on station.***</p>
+This suggested that Iridium 23 must have failed on station.
+However, Iridium 23 appears still to be under control and remains
+on station, so there may have been only a partial or temporary
+failure. The two satellites remain a few seconds apart. ***</p>
 
 <pre>Orbital  &lt;-------- Operational satellites --------&gt;   Spares (in current sequence)
 Plane
@@ -565,17 +568,19 @@ warn <<eod if $fail;
 eod
 
 sub parse_date {
-my ($url) = @_;
-my $rslt = $ua->get ($url);
-$rslt->is_success or return ($rslt->status_line);
-my $got = $rslt->header ('Last-Modified') or
-    return ('Last-Modified header not returned', $rslt);
-my ($day, $mon, $yr, $hr, $min, $sec) =
-    $got =~ m/,\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)/ or
-    return ('Unable to parse Last-Modified header', $rslt);
-defined (my $mn = $mth{lc $mon}) or
-    return ('Invalid month in Last-Modified header', $rslt);
-return (undef, $rslt, $got, timegm ($sec, $min, $hr, $day, $mn, $yr));
+    my ($url) = @_;
+
+    my $rslt = $ua->get ($url);
+    $rslt->is_success
+	or return ($rslt->status_line);
+    my $got = $rslt->header ('Last-Modified')
+	or return ('Last-Modified header not returned', $rslt);
+    my ($day, $mon, $yr, $hr, $min, $sec) =
+	$got =~ m/,\s*(\d+)\s+(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)/
+	or return ('Unable to parse Last-Modified header', $rslt);
+    defined (my $mn = $mth{lc $mon})
+	or return ('Invalid month in Last-Modified header', $rslt);
+    return (undef, $rslt, $got, timegm ($sec, $min, $hr, $day, $mn, $yr));
 }
 
 1;

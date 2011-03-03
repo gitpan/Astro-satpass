@@ -91,29 +91,23 @@ indicated.
 
 =head1 NOTICE
 
-The C<rightascension> attribute is deprecated (and about time!). You
-should use the C<ascendingnode> attribute instead.
-
-Currently, C<rightascension> and C<ascendingnode> are equivalent.
-
-As scheduled, with this release a warning is generated every time
-the C<rightascension> attribute is used. This warning can be suppressed
-by asserting C<< no warnings qw{ deprecated }; >> at the point the
-warning is issued. But you really should convert the warning code to use
-the C<ascendingnode> attribute.
-
-At the first release in 2011 the C<rightascension> attribute will
-disappear.
+As noted in previous releases, in this release (the first release in
+2011) the C<rightascension> attribute has been eliminated. Use the
+C<ascendingnode> attribute instead.
 
 =head1 DESCRIPTION
 
-This module implements the NORAD orbital propagation models described
-in their "SPACETRACK REPORT NO. 3, Models for Propagation of NORAD
-Element Sets." In other words, it turns the two- or three-line
-element sets available from such places as L<http://www.space-track.org/>
-or L<http://celestrak.com/> into predictions of where the relevant
-orbiting bodies will be. Additionally, the pass() method implements an
-actual visibility prediction system.
+This module implements the orbital propagation models described in
+"SPACETRACK REPORT NO. 3, Models for Propagation of NORAD Element Sets"
+and "Revisiting Spacetrack Report #3." See the
+L<ACKNOWLEDGMENTS|/ACKNOWLEDGMENTS> section for details on these
+reports.
+
+In other words, this module turns the two- or three-line element sets
+available from such places as L<http://www.space-track.org/> or
+L<http://celestrak.com/> into predictions of where the relevant orbiting
+bodies will be. Additionally, the pass() method implements an actual
+visibility prediction system.
 
 The models implemented are:
 
@@ -206,7 +200,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.034';
+our $VERSION = '0.035';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -358,16 +352,6 @@ eod
 	return 0;
     },
     model_error => 0,
-    rightascension => sub {
-	warnings::warnif(
-	    deprecated =>
-	    'The Astro::Coord::ECI::TLE rightascension attribute is deprecated. Use ascendingnode instead',
-	);
-	$_[0]{ascendingnode} = $_[2];
-	return 1;
-    },
-    ## TODO get rid of the above once rightascension is deprecated out
-    # of existence. Ditto the accessor, below.
     ascendingnode => 1,
     eccentricity => 1,
     argumentofperigee => 1,
@@ -667,13 +651,6 @@ L</Attributes> section for a description of the attributes.
 
 {
     my %accessor = (
-	rightascension => sub {
-	    warnings::warnif(
-		deprecated =>
-		'The Astro::Coord::ECI::TLE rightascension attribute is deprecated. Use ascendingnode instead',
-	    );
-	    return $_[0]{ascendingnode};
-	},
 	tle => sub {$_[0]{$_[1]} ||= $_[0]->_make_tle()},
     );
     sub get {
@@ -973,7 +950,6 @@ eod
 	    $temp /= SGP_XMNPDA;
 	    $ele{$_} *= $temp;
 	}
-	my $id  = $ele{id};
 	my $body = __PACKAGE__->new (%ele);	# Note that setting the
 						# ID does the reblessing.
 	$body->{tle} = $tle;
@@ -1138,14 +1114,6 @@ eod
     my $sun = Astro::Coord::ECI::Sun->new ();
     my $illum = $tle->get ('illum');
 
-#	Foreach body to be modelled
-
-    my $id = $tle->get ('id');
-    my $name = $tle->get ('name');
-    $name = $name ? " - $name" : '';
-
-    my $bm_start = time ();
-
 
 #	For each time to be covered
 
@@ -1153,7 +1121,6 @@ eod
     my $bigstep = 5 * $step;
     my $littlestep = $step;
     my $end = $pass_end;
-    my $day = '';
     my ($suntim, $rise) =
 	$sta->universal ($pass_start)->next_elevation ($sun, $twilight);
     my @info;	# Information on an individual pass.
@@ -2566,7 +2533,7 @@ eod
 	    xnodp => $xnodp,
 	};
     };
-    my $dpsp = $self->{&TLE_INIT}{TLE_deep};
+#>>>trw    my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 
 
 #* UPDATE FOR SECULAR GRAVITY AND ATMOSPHERIC DRAG
@@ -3227,7 +3194,7 @@ EOD
 	    xnodp => $xnodp,
 	};
     };
-    my $dpsp = $self->{&TLE_INIT}{TLE_deep};
+#>>>trw    my $dpsp = $self->{&TLE_INIT}{TLE_deep};
 
 
 #*	UPDATE FOR SECULAR GRAVITY AND ATMOSPHERIC DRAG
@@ -3474,7 +3441,7 @@ sub _dpinit {
 #>>>	are those values computed inside the loop that are used outside
 #>>>	the loop. Accumulators are set to zero. -- TRW
 
-    my $savtsn = 1.0E20;
+#>>>trw    my $savtsn = 1.0E20;
     my $xnoi = 1 / $xnq;
     my ($sse, $ssi, $ssl, $ssh, $ssg) = (0, 0, 0, 0, 0);
     my ($se2, $ee2, $si2, $xi2, $sl2, $xl2, $sgh2, $xgh2, $sh2, $xh2, $se3,
@@ -3496,8 +3463,10 @@ sub _dpinit {
 #>>>	was added to help convert the assigned GOTOs and associated
 #>>>	code into a loop. -- TRW
 
+#>>>trw	my ($zcosg, $zsing, $zcosi, $zsini, $zcosh, $zsinh, $cc, $zn, $ze,
+#>>>trw	    $zmo, $lunar) = @$inputs;
 	my ($zcosg, $zsing, $zcosi, $zsini, $zcosh, $zsinh, $cc, $zn, $ze,
-	    $zmo, $lunar) = @$inputs;
+	    undef, $lunar) = @$inputs;
 
 
 #>>>	From here until the next comment of mine is essentialy
@@ -5553,7 +5522,8 @@ sub _r_sgp4init {
     $parm->{argumentofperigee} = $self->{argumentofperigee};
     $parm->{meananomaly} = $self->{meananomaly};
 
-    my ($t, @r, @v);
+#>>>>trw    my ($t, @r, @v);
+    my ($t);
 #>>>>trw	INCLUDE 'SGP4.CMN'
 
 
@@ -6629,8 +6599,12 @@ eod
 
 #	Initialization
 
-%status = (	# As of 03-Dec-2010, from McCants' document dated
-		# 13-Feb-2010.
+# The following as of 15-Dec-2010, from Kelso's document dated
+# 14-Dec-2010.
+# The difference from 0.034 is that Kelso has Iridium 23 (OID 24906) as
+# a spare, whereas McCants and Sladen have it out of service.
+# Generated by satpass> status dump >file
+%status = (
   '25432' => {
                'comment' => '',
                'status' => 0,
@@ -7081,7 +7055,7 @@ eod
              },
   '24906' => {
                'comment' => '',
-               'status' => 2,
+               'status' => 1,
                'name' => 'Iridium 23',
                'class' => 'Astro::Coord::ECI::TLE::Iridium',
                'type' => 'iridium',
@@ -7626,12 +7600,6 @@ The default is true (i.e. 1).
 This attribute contains number of revolutions the body has made since
 launch, at the epoch.
 
-=item rightascension (numeric, parse)
-
-This attribute contains the right ascension of the ascending node of the
-orbit at the epoch, in radians. B<This attribute is deprecated in favor
-of the ascendingnode attribute.>
-
 =item secondderivative (numeric, parse)
 
 This attribute contains the second time derivative of the mean
@@ -7697,7 +7665,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2010, Thomas R. Wyant, III
+Copyright (C) 2005-2011 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text
