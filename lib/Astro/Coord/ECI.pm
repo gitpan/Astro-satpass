@@ -83,7 +83,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.035';
+our $VERSION = '0.036';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -196,7 +196,7 @@ attribute, or undef if the attribute name is not valid.
 
 =cut
 
-sub attribute {return $mutator{$_[1]} ? __PACKAGE__ : undef}
+sub attribute {return exists $mutator{$_[1]} ? __PACKAGE__ : undef}
 
 
 =item ($azimuth, $elevation, $range) = $coord->azel ($coord2, $upper);
