@@ -43,7 +43,7 @@ package Astro::Coord::ECI::Moon;
 use strict;
 use warnings;
 
-our $VERSION = '0.038';
+our $VERSION = '0.039';
 
 use base qw{Astro::Coord::ECI};
 
@@ -490,7 +490,7 @@ eod
 
 #	Coordinates of Moon (finally!)
 
-    my $lambda = deg2rad ($sigmal / 1_000_000) + $Lprime;
+    my $lambda = mod2pi( deg2rad ($sigmal / 1_000_000) + $Lprime );
     my $beta = deg2rad ($sigmab / 1_000_000);
     my $delta = $sigmar / 1000 + 385_000.56;
 
