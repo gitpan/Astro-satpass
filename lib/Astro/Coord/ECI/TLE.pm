@@ -1,7 +1,6 @@
 =head1 NAME
 
-Astro::Coord::ECI::TLE - Compute satellite locations using NORAD orbit
-propagation models
+Astro::Coord::ECI::TLE - Compute satellite locations using NORAD orbit propagation models
 
 =head1 SYNOPSIS
 
@@ -200,12 +199,13 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.039_02';
+our $VERSION = '0.039_03';
 
 use base qw{Astro::Coord::ECI Exporter};
 
 use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
-    embodies find_first_true load_module max mod2pi PI PIOVER2 rad2deg
+    embodies find_first_true load_module looks_like_number
+    max mod2pi PI PIOVER2 rad2deg
     SECSPERDAY TWOPI thetag };
 
 use Carp qw{carp croak confess};
@@ -316,10 +316,15 @@ my %attrib = (
     backdate => 0,
     effective => sub {
 	my ($self, $name, $value) = @_;
-	if (defined $value and $value =~ m{ \A (\d+) / (\d+) /
-		(\d+) : (\d+) : (\d+ [.] \d+) \z }smx) {
-	    $value = timegm (0, 0, 0, 1, 0, $1 - 1900) + (
-		(($2 - 1) * 24 + $3) * 60 + $4) * 60 + $5;
+	if ( defined $value && ! looks_like_number( $value ) ) {
+	    if ( $value =~ m{ \A (\d+) / (\d+) / (\d+) : (\d+) :
+		    (\d+ (?: [.] \d* )? ) \z }smx ) {
+		$value = timegm (0, 0, 0, 1, 0, $1 - 1900) + (
+		    (($2 - 1) * 24 + $3) * 60 + $4) * 60 + $5;
+	    } else {
+		carp "Invalid effective date '$value'";
+		$value = undef;
+	    }
 	}
 	$self->{$name} = $value;
 	return 0;
@@ -1159,10 +1164,18 @@ eod
 	}
 
 
-#	Skip if the sun is up.
+#	Skip if the sun is up. We set the step size small, because we
+#	are not actually tracking the satellite so we do not know what
+#	the appropriate size is.
 
-	next if $want_visible && !@info && !$rise &&
-	    $time < $sun_screen;
+	$want_visible
+	    and	not @info
+	    and not $rise
+	    and $time < $sun_screen
+	    and do {
+	    $step = $littlestep;
+	    next;
+	};
 
 
 #	Calculate azimuth and elevation.
@@ -1177,9 +1190,17 @@ eod
 
 
 #	If the body is below the horizon, we check for accumulated data,
-#	handle it if any, clear it, and on to the next iteration.
+#	handle it if any, clear it, and on to the next iteration. We
+#	have to make the check on effective horizon as well as screening
+#	horizon, because maybe we are at the very end of the prediction
+#	period and the satellite makes it below the screening horizon
+#	but not the effective horizon before the end of the prediction
+#	period. Sigh.
 
-	if ($elev < $screening_horizon) {
+	if ( $elev < $screening_horizon ||
+	    @info && $elev < $effective_horizon &&
+	    $info[-1]{elevation} >= $effective_horizon
+	) {
 	    @info = () unless $visible;
 	    next unless @info;
 
@@ -1189,17 +1210,19 @@ eod
 
 	    while ($want_visible) {
 		my $time = $info[0]{time} - $step;
-		last if $elev < $effective_horizon;
+		my ( $try_azm, $try_elev, $try_rng ) = $sta->azel (
+		    $tle->universal( $time ) );
+		last if $try_elev < $effective_horizon;
 		my $litup = $time < $suntim ? 2 - $rise : 1 + $rise;
 		$litup = 0 if $litup == 1 &&
-		    ($tle->azel ($illum->universal ($time), $want_lit))[1]
-		    < $tle->dip ();
+		    ( $tle->azel( $illum->universal( $time ), $want_lit)
+		    )[1] < $tle->dip ();
 		unshift @info, {
-		    azimuth => $azm,
-		    elevation => $elev,
+		    azimuth => $try_azm,
+		    elevation => $try_elev,
 		    event => PASS_EVENT_NONE,
 		    illumination => $lighting[$litup],
-		    range => $rng,
+		    range => $try_rng,
 		    time => $time,
 		};
 	    }

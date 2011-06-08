@@ -9,7 +9,7 @@ use Carp;
 use File::Spec;
 
 my @generated_dir = qw{ xt author generated };
-my @hide = qw{ Date::Manip Time::y2038 };
+my @hide = qw{ Date::Manip Test::MockTime Time::y2038 };
 
 {
     my $done;
@@ -86,6 +86,8 @@ use strict;
 use warnings;
 
 use $hider qw{ @hide };
+
+our \$SKIP_TEST = 'Skip requested for author testing';
 
 do '$ip';
 

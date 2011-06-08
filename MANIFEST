@@ -35,7 +35,6 @@ README
 README.MacOS
 t/basic.t
 t/eci.t
-t/iridium.t
 t/moon.t
 t/parse_time.t
 t/set.t
@@ -47,10 +46,12 @@ t/tle.t
 t/tle_apsides.t
 t/tle_effective.t
 t/tle_exception.t
+t/tle_flare.t
 t/tle_misc.t
 t/tle_pass.t
 t/tle_sgp4r.t
 t/tle_support.t
+xt/author/basic.t
 xt/author/critic.t
 xt/author/executable.t
 xt/author/iridium_status.t
