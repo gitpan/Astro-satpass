@@ -38,7 +38,7 @@ $clipboard_unavailable = $IO::Clipboard::clipboard_unavailable;
 #	Initialization
 #
 
-our $VERSION = '0.039_04';
+our $VERSION = '0.039_05';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -1522,7 +1522,7 @@ eod
 	    debug => $parm{debug},
 	    geometric => $parm{geometric},
 	    horizon => $horizon,
-	    interval => $opt{verbose} ? $pass_step : 0,
+	    interval => $parm{verbose} ? $pass_step : 0,
 	    limb => $parm{lit},
 	    model => $model,
 	    twilight => $parm{_twilight},
@@ -4481,7 +4481,8 @@ This command predicts visibility of the contents of the observing
 list, in accordance with the various L</PARAMETERS>, between the given
 start_time and end_time, using the given increment. See the
 L</SPECIFYING TIMES> topic below for how to specify times. The increment
-is in seconds.
+is in seconds, and does nothing useful unless the L<verbose|/verbose>
+setting is true.
 
 The position of the visible body is given in either elevation, azimuth,
 and range or right ascension, declination, and range as seen from the

@@ -199,7 +199,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.039_04';
+our $VERSION = '0.039_05';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -211,7 +211,7 @@ use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
 use Carp qw{carp croak confess};
 use Data::Dumper;
 use IO::File;
-use POSIX qw{floor fmod strftime};
+use POSIX qw{ ceil floor fmod strftime };
 
 BEGIN {
     local $@;
@@ -369,6 +369,7 @@ eod
     visible => 0,	# Pass() reports only illuminated passes.
     appulse => 0,	# Maximum appulse to report.
     interval => 0,	# Interval for pass() positions, if positive.
+    lazy_pass_position => 0,	# Position optional if true.
     ds50 => undef,	# Read-only
     epoch_dynamical => undef,	# Read-only
     rcs => 0,		# Radar cross-section
@@ -388,6 +389,7 @@ my %static = (
     gravconst_r => 72,	# Specify geodetic data set for sgp4r.
     illum => 'sun',
     interval => 0,
+    lazy_pass_position => 0,
     limb => 1,
     model => 'model',
     reblessable => 1,
@@ -1002,22 +1004,18 @@ represented by an anonymous hash containing the following keys:
 The individual events are also anonymous hashes, with each hash
 containing the following keys:
 
-  {azimuth} => Azimuth of event in radians;
-  {body} => Reference to body making pass;
+  {azimuth} => Azimuth of event in radians (see note 1);
+  {body} => Reference to body making pass (see note 2);
   {appulse} => {  # This is present only for PASS_EVENT_APPULSE;
       {angle} => minimum separation in radians;
       {body} => other body involved in appulse;
       }
-  {elevation} => Elevation of event in radians;
+  {elevation} => Elevation of event in radians (see note 1);
   {event} => Event code (PASS_EVENT_xxxx);
   {illumination} => Illumination at time of event (PASS_EVENT_xxxx);
-  {range} => Distance to event in kilometers;
-  {station} => Reference to observing station;
+  {range} => Distance to event in kilometers (see note 1);
+  {station} => Reference to observing station (see note 2);
   {time} => Time of event;
-
-Note that the time set in the various {body} and {station} objects is
-B<not> guaranteed to be anything in particular. Specifically, it is
-almost certainly not the time of the event.
 
 The events are coded by the following manifest constants:
 
@@ -1062,10 +1060,29 @@ the object:
   * geometric	# Use geometric horizon for pass rise/set
   * horizon	# Effective horizon
   * interval	# Interval for pass() positions, if positive
+  * lazy_pass_position # {azimuth}, {elevation} and {range} are
+                # optional if true (see note 1).
   * illum	# Source of illumination.
   * limb	# Whether lit when upper limb above horizon
   * twilight	# Distance of illuminator below horizon
   * visible	# Pass() reports only illuminated passes
+
+Note 1:
+
+If the C<lazy_pass_position> attribute is true, the {azimuth},
+{elevation}, and {range} keys may not be present. This attribute gives
+the event-calculating algorithm permission to omit these if the time of
+the event can be determined without computing the position of the body.
+Currently this happens only for events generated in response to setting
+the C<interval> attribute, but the user should not make this assumption
+in his or her own code.
+
+Note 2:
+
+The time set in the various {body} and {station} objects is B<not>
+guaranteed to be anything in particular. Specifically, it is almost
+certainly not the time of the event. If you make use of the {body}
+object you will probably need to set its time to the time of the event.
 
 =cut
 
@@ -1108,13 +1125,13 @@ eod
 	PASS_EVENT_DAY,
     );
     my $verbose = $tle->get ('interval');
-    my $pass_step = $verbose || 60;
+    my $lazy_pass_position = $tle->get( 'lazy_pass_position' );
+    my $pass_step = 60;
     my $horizon = $tle->get ('horizon');
     my $effective_horizon = $tle->get ('geometric') ? 0 : $horizon;
     my $twilight = $tle->get ('twilight');
     my $want_lit = $tle->get ('limb');
     my $want_visible = $tle->get ('visible');
-    my $want_exact = 1;			# Always want exact event timings.
     my $appulse_dist = $tle->get ('appulse');
     my $debug = $tle->get ('debug');
 
@@ -1144,13 +1161,12 @@ eod
     my $bigstep = 5 * $step;
     my $littlestep = $step;
     my $end = $pass_end;
-    my ( $suntim, $rise, $sun_screen, $sun_limit ) =
+    my ( $suntim, $dawn, $sun_screen, $sun_limit ) =
         _next_elevation_screen( $sta->universal( $pass_start ),
 	    $pass_step, $sun, $twilight );
     my @info;	# Information on an individual pass.
     my @passes;	# Accumulated informtion on all passes.
     my $visible;
-    my $culmination;	# Time of maximum elevation.
     for (my $time = $pass_start; $time <= $end; $time += $step) {
 
 
@@ -1158,7 +1174,7 @@ eod
 #	the next one.
 
 	if ( $time >= $sun_limit ) {
-	    ( $suntim, $rise, $sun_screen, $sun_limit ) =
+	    ( $suntim, $dawn, $sun_screen, $sun_limit ) =
 		_next_elevation_screen( $sta->universal( $suntim ),
 		    $pass_step, $sun, $twilight );
 	}
@@ -1170,7 +1186,7 @@ eod
 
 	$want_visible
 	    and	not @info
-	    and not $rise
+	    and not $dawn
 	    and $time < $sun_screen
 	    and do {
 	    $step = $littlestep;
@@ -1206,14 +1222,15 @@ eod
 
 
 #	    We may have skipped part of the pass because it began in
-#	    daylight. Pick up that part now.
+#	    daylight or before the official beginning of the prediction
+#	    period. Pick up that part now.
 
-	    while ($want_visible) {
+	    {	# Single-iteration loop.
 		my $time = $info[0]{time} - $step;
 		my ( $try_azm, $try_elev, $try_rng ) = $sta->azel (
 		    $tle->universal( $time ) );
 		last if $try_elev < $effective_horizon;
-		my $litup = $time < $suntim ? 2 - $rise : 1 + $rise;
+		my $litup = $time < $suntim ? 2 - $dawn : 1 + $dawn;
 		$litup = 0 if $litup == 1 &&
 		    ( $tle->azel( $illum->universal( $time ), $want_lit)
 		    )[1] < $tle->dip ();
@@ -1225,82 +1242,83 @@ eod
 		    range => $try_rng,
 		    time => $time,
 		};
+		redo;
 	    }
 
 
-#	    If we want the exact times of the events, compute them.
+	    # Compute the exact events.
 
-	    if ($want_exact) {
+	    my @time;
 
-		my @time;
-
-		# Compute exact max
+	    # Compute exact max
 
 =begin comment
 
-		{
-		    my @try;
-		    if ( @info > 1 ) {
-			@try = (
-			    [ $info[0]{time}, $sta->azel( $tle->universal(
-					$info[0]{time} ) ) ],
-			    [ $info[-1]{time}, $sta->azel( $tle->universal(
-					$info[-1]{time} ) ) ],
-			);
-		    } else {
-			my $trial_time = $info[0]{time} - 30;
-			push @try, [ $trial_time, $sta->azel(
-				$tle->universal( $trial_time ) ) ];
-			$trial_time += 60;
-			push @try, [ $trial_time, $sta->azel(
-				$tle->universal( $trial_time ) ) ];
-		    }
-
-		    while ( $try[1][0] - $try[0][0] > 0.01 ) {
-			my $middle = ( $try[0][0] + $try[1][0] ) / 2;
-			my $inx = $try[0][2] > $try[1][2] ? 1 : 0;
-			splice @try, $inx, 1, [ $middle, $sta->azel(
-				$tle->universal( $middle ) ) ];
-		    }
-
-		    push @time, [ floor( $try[1][0] + .5 ), PASS_EVENT_MAX ];
-
+	    {
+		my @try;
+		if ( @info > 1 ) {
+		    @try = (
+			[ $info[0]{time}, $sta->azel( $tle->universal(
+				    $info[0]{time} ) ) ],
+			[ $info[-1]{time}, $sta->azel( $tle->universal(
+				    $info[-1]{time} ) ) ],
+		    );
+		} else {
+		    my $trial_time = $info[0]{time} - 30;
+		    push @try, [ $trial_time, $sta->azel(
+			    $tle->universal( $trial_time ) ) ];
+		    $trial_time += 60;
+		    push @try, [ $trial_time, $sta->azel(
+			    $tle->universal( $trial_time ) ) ];
 		}
+
+		while ( $try[1][0] - $try[0][0] > 0.01 ) {
+		    my $middle = ( $try[0][0] + $try[1][0] ) / 2;
+		    my $inx = $try[0][2] > $try[1][2] ? 1 : 0;
+		    splice @try, $inx, 1, [ $middle, $sta->azel(
+			    $tle->universal( $middle ) ) ];
+		}
+
+		push @time, [ floor( $try[1][0] + .5 ), PASS_EVENT_MAX ];
+
+	    }
 
 =end comment
 
 =cut
 
-		my ( $trial_start, $trial_finish ) = @info > 1 ?
-		    ( $info[0]{time}, $info[-1]{time} ) :
-		    ( $info[0]{time} - $pass_step,
-			$info[0]{time} + $pass_step );
-		$culmination = find_first_true( $trial_start,
-		    $trial_finish,
-			sub { ( $sta->azel( $tle->universal( $_[0] ) ) )[1] >
-			    ( $sta->azel( $tle->universal( $_[0] + 1 ) ) )[1]
-			});
-		push @time, [ $culmination, PASS_EVENT_MAX ];
-
-
-#		Compute exact rise and set.
-
-		push @time, (
-		    [find_first_true ($info[0]{time} - $step,
-			    $culmination,
-			sub {($sta->azel ($tle->universal ($_[0])))[1] >=
-			$effective_horizon}), PASS_EVENT_RISE],
-		    [find_first_true ($culmination, $info[-1]{time}
-			    + $step,
-			sub {($sta->azel ($tle->universal ($_[0])))[1] <
-			$effective_horizon}), PASS_EVENT_SET],
-##		    [find_first_true ($info[0]{time}, $info[-1]{time},
-##			sub {($sta->azel ($tle->universal ($_[0])))[1] >
-##				($sta->azel ($tle->universal ($_[0] + 1)))[1]}),
-##				PASS_EVENT_MAX],
+	    my ( $trial_start, $trial_finish ) =
+		( $info[0]{time} - $pass_step,
+		    $info[-1]{time} + $pass_step
 		);
+	    my $culmination = find_first_true( $trial_start,
+		$trial_finish,
+		    sub { ( $sta->azel( $tle->universal( $_[0] ) ) )[1] >
+			( $sta->azel( $tle->universal( $_[0] + 1 ) ) )[1]
+		    });
+	    push @time, [ $culmination, PASS_EVENT_MAX ];
 
-		warn <<eod if $debug;	## no critic (RequireCarping)
+
+	    # Compute exact rise and set.
+
+	    my $sat_rise = find_first_true( $info[0]{time} - $step,
+		$culmination,
+		sub { ( $sta->azel( $tle->universal( $_[0] ) ) )[1] >=
+		    $effective_horizon
+		},
+	    );
+	    my $sat_set = find_first_true ( $culmination,
+		$info[-1]{time} + $step,
+		sub { ( $sta->azel( $tle->universal( $_[0] ) ) )[1] <
+		    $effective_horizon
+		},
+	    );
+	    push @time,
+		[ $sat_rise, PASS_EVENT_RISE ],
+		[ $sat_set, PASS_EVENT_SET ],
+	    ;
+
+	    warn <<eod if $debug;	## no critic (RequireCarping)
 
 Debug - Computed @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[0][0]
 		    ]} $time[0][1]
@@ -1310,173 +1328,185 @@ Debug - Computed @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[0][0]
 		    ]} $time[2][1]
 eod
 
-#		Compute nearest approach to background bodies
+	    # Because we relaxed the detection criteria to be sure we
+	    # caught all passes, we may have a pass that ended before
+	    # the prediction interval started. Reject that here.
 
-#		Note (fortuitous discovery) the ISS travels 1.175
-#		degrees per second at the zenith, so I need better
-#		than 1 second resolution to detect a transit.
+	    $sat_set < $pass_start
+		and do {
+		@info = ();
+		next;
+	    };
 
-		foreach my $body (@sky) {
-		    my $when = find_first_true ($time[1][0], $time[2][0],
-			sub {$sta->angle ($body->universal ($_[0]),
-					$tle->universal ($_[0])) <
-				$sta->angle ($body->universal ($_[0] + .1),
-					$tle->universal ($_[0] + .1))},
-			.1);
-		    my $angle = 
-			$sta->angle ($body->universal ($when),
-				$tle->universal ($when));
-		    next if $angle > $appulse_dist;
-		    push @time, [$when, PASS_EVENT_APPULSE,
-			appulse => {angle => $angle, body => $body}];
-		    warn <<eod if $debug;	## no critic (RequireCarping)
-                $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]}
+	    # Compute nearest approach to background bodies
+
+	    # Note (fortuitous discovery) the ISS travels 1.175
+	    # degrees per second at the zenith, so I need better
+	    # than 1 second resolution to detect a transit.
+
+	    foreach my $body (@sky) {
+		my $when = find_first_true ($time[1][0], $time[2][0],
+		    sub {$sta->angle ($body->universal ($_[0]),
+				    $tle->universal ($_[0])) <
+			    $sta->angle ($body->universal ($_[0] + .1),
+				    $tle->universal ($_[0] + .1))},
+		    .1);
+		my $angle = 
+		    $sta->angle ($body->universal ($when),
+			    $tle->universal ($when));
+		next if $angle > $appulse_dist;
+		push @time, [$when, PASS_EVENT_APPULSE,
+		    appulse => {angle => $angle, body => $body}];
+		warn <<eod if $debug;	## no critic (RequireCarping)
+	    $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]}
 eod
-		}
+	    }
 
 
-#		Clear the original data unless we're verbose.
+	    # Clear the original data.
 
-		@info = () unless $verbose;
+	    @info = ();
 
 
-#		Generate the full data for the exact events.
+	    # Generate the full data for the exact events.
 
-		my ($suntim, $rise);
-		warn "Contents of \@time: ", Dumper (\@time)	## no critic (RequireCarping)
-		    if $debug;
-		foreach (sort {$a->[0] <=> $b->[0]} @time) {
-		    my @event = @$_;
-		    my ( $time, $evnt_name, @extra ) = @event;
-		    ($suntim, $rise) =
-			$sta->universal ($time)->next_elevation ($sun,
-			    $twilight)
-			if !$suntim || $time >= $suntim;
+	    my ($suntim, $dawn);
+	    warn "Contents of \@time: ", Dumper (\@time)	## no critic (RequireCarping)
+		if $debug;
+	    foreach (sort {$a->[0] <=> $b->[0]} @time) {
+		my ( $time, $evnt_name, @extra ) = @$_;
+		($suntim, $dawn) =
+		    $sta->universal ($time)->next_elevation ($sun,
+			$twilight)
+		    if !$suntim || $time >= $suntim;
+		my ($azm, $elev, $rng) = $sta->azel (
+		    $tle->universal ($time));
+		my $litup = $time < $suntim ? 2 - $dawn : 1 + $dawn;
+		$litup = 0 if $litup == 1 &&
+		    ($tle->azel ($illum->universal ($time),
+			    $want_lit))[1] < $tle->dip ();
+		push @info, {
+		    azimuth => $azm,
+		    body => $tle,
+		    elevation => $elev,
+		    event => $evnt_name,
+		    illumination => $lighting[$litup],
+		    range => $rng,
+		    station => $sta,
+		    time => $time,
+		    @extra,
+		};
+	    }
+
+	    # Compute illumination changes
+
+	    {
+		my @illum;
+		my $prior;
+		foreach my $evt ( @info ) {
+		    $prior or next;
+		    $prior->{illumination} == $evt->{illumination}
+			and next;
+		    my ($suntim, $dawn) =
+			$sta->universal ($prior->{time})->
+			next_elevation ($sun, $twilight);
+		    my $time = 
+			find_first_true ($prior->{time}, $evt->{time},
+			sub {
+			    my $litup = $_[0] < $suntim ?
+				2 - $dawn : 1 + $dawn;
+			    $litup = 0 if $litup == 1 &&
+				($tle->azel ($illum->universal ($_[0]),
+					$want_lit))[1] < $tle->dip ();
+			    $lighting[$litup] == $evt->{illumination}
+			    });
 		    my ($azm, $elev, $rng) = $sta->azel (
 			$tle->universal ($time));
-		    my $litup = $time < $suntim ? 2 - $rise : 1 + $rise;
-		    $litup = 0 if $litup == 1 &&
-			($tle->azel ($illum->universal ($time),
-				$want_lit))[1] < $tle->dip ();
-		    push @info, {
+		    push @illum, {
 			azimuth => $azm,
 			body => $tle,
 			elevation => $elev,
-			event => $evnt_name,
-			illumination => $lighting[$litup],
+			event => $evt->{illumination},
+			illumination => $evt->{illumination},
 			range => $rng,
 			station => $sta,
 			time => $time,
-			@extra,
 		    };
-		}
-
-		# Compute illumination changes
-
-		{
-		    my @illum;
-		    my $prior;
-		    foreach my $evt ( @info ) {
-			$prior or next;
-			$prior->{illumination} == $evt->{illumination}
-			    and next;
-			my ($suntim, $rise) =
-			    $sta->universal ($prior->{time})->
-			    next_elevation ($sun, $twilight);
-			my $time = 
-			    find_first_true ($prior->{time}, $evt->{time},
-			    sub {
-				my $litup = $_[0] < $suntim ?
-				    2 - $rise : 1 + $rise;
-				$litup = 0 if $litup == 1 &&
-				    ($tle->azel ($illum->universal ($_[0]),
-					    $want_lit))[1] < $tle->dip ();
-				$lighting[$litup] == $evt->{illumination}
-				});
-			my ($azm, $elev, $rng) = $sta->azel (
-			    $tle->universal ($time));
-			push @illum, {
-			    azimuth => $azm,
-			    body => $tle,
-			    elevation => $elev,
-			    event => $evt->{illumination},
-			    illumination => $evt->{illumination},
-			    range => $rng,
-			    station => $sta,
-			    time => $time,
-			};
-		    } continue {
-			$prior = $evt;
-		    }
-		    push @info, @illum;
-		}
-
-#		Do not record this pass if it turns out not to contain
-#		any points that meet the recording criteria.
-
-		eval {	# So I can return().
-		    foreach my $event ( @info ) {
-			$event->{elevation} < $horizon
-			    and next;
-			not $want_visible
-			    or $event->{illumination} == PASS_EVENT_LIT
-			    or next;
-			return 1;
-		    }
-		    return 0;
-		} or do {
-		    @info = ();
-		    next;
-		};
-
-#		Sort the data, and eliminate duplicates.
-
-=begin comment
-
-		my @foo = sort {$a->{time} <=> $b->{time}} @info;
-		my $prior = undef;
-		@info = ();
-		foreach my $evt (@foo) {
-		    push @info, $evt unless defined $prior &&
-			$evt->{time} == $prior->{time} &&
-			$evt->{event} != PASS_EVENT_APPULSE;
+		} continue {
 		    $prior = $evt;
 		}
+		push @info, @illum;
+	    }
 
-=end comment
+	    # Do not record this pass if it turns out not to contain
+	    # any points that meet the recording criteria.
 
-=cut
+	    eval {	# So I can return().
+		foreach my $event ( @info ) {
+		    $event->{elevation} < $horizon
+			and next;
+		    not $want_visible
+			or $event->{illumination} == PASS_EVENT_LIT
+			or next;
+		    return 1;
+		}
+		return 0;
+	    } or do {
+		@info = ();
+		next;
+	    };
+
+	    # If we're verbose, calculate the points.
+
+	    if ( $verbose ) {
+
+		# We need to re-sort the events because illumination
+		# changes got appended to the rise, max, set, and
+		# appulse.
 
 		@info = sort { $a->{time} <=> $b->{time} } @info;
-	    }
 
+		my $inx = 0;
+		my $illum = $info[$inx++]{illumination};
+		my %events = map { $_->{time} => 1 } @info;
+		for ( my $it = ceil( $sat_rise ); $it < $sat_set;
+		    $it += $verbose ) {
 
-#	    Figure out what the events are.
+		    # If we already have an event for this time, skip.
 
-	    unless ($want_exact) {
-		$info[0]{event} = PASS_EVENT_RISE;
-		$info[-1]{event} = PASS_EVENT_SET;
-		$info[-1]{elevation} = 0 if $info[-1]{elevation} < 0;
-					# Because -.6 degrees (which we
-					# get because no atmospheric
-					# refraction below the horizon)
-					# looks funny.
-		my ($last, $max);
-		foreach my $pt (@info) {
-		    $last or next;
-		    ($last->{elevation} > $pt->{elevation})
-			and ($max ||= $last);
-		    ($last->{illumination} != $pt->{illumination})
-			and ($pt->{event} ||= $pt->{illumination});
-		} continue {
-		    $last = $pt;
+		    $events{$it} and next;
+
+		    # The next line of code relies on the fact that the
+		    # events from rise through max and set are already
+		    # in chronological order. Yes, in theory we step off
+		    # the end of that part of @info, but in practice we
+		    # exit the for loop before we get to that point.
+
+		    while ( $info[$inx]{time} < $it ) {
+			$illum = $info[$inx++]{illumination};
+		    }
+####		    my ( $azm, $elev, $rng ) = $sta->azel(
+####			$tle->universal( $it ) );
+		    push @info, {
+####			azimuth => $azm,
+			body => $tle,
+####			elevation => $elev,
+			event => PASS_EVENT_NONE,
+			illumination => $illum,
+####			range => $rng,
+			station => $sta,
+			time => $it,
+		    };
+		    $lazy_pass_position
+			or @{ $info[-1] }{
+			    qw{azimuth elevation range } } =
+			    $sta->azel( $tle->universal( $it ) );
 		}
-		$max and do {
-		    $max->{event} = PASS_EVENT_MAX;
-		    $culmination = $max->{time};
-		};
 	    }
 
+#		Sort the data
+
+	    @info = sort { $a->{time} <=> $b->{time} } @info;
 
 #	    Record the data for the pass.
 
@@ -1500,12 +1530,12 @@ eod
 
 #	Calculate whether the body is visible.
 
-	my $litup = $time < $sun_screen ? 2 - $rise : 1 + $rise;
+	my $litup = $time < $sun_screen ? 2 - $dawn : 1 + $dawn;
 	my $sun_elev_from_sat = ( $tle->azel( $illum->universal( $time )
 		) )[1] - $tle->dip();
 	$visible ||= $elev > $screening_horizon && ( ! $want_visible ||
 	    $litup == 1 && $sun_elev_from_sat >= $min_sun_elev_from_sat );
-	$litup = $time < $suntim ? 2 - $rise : 1 + $rise;
+	$litup = $time < $suntim ? 2 - $dawn : 1 + $dawn;
 	$litup == 1
 	    and $sun_elev_from_sat < 0
 	    and $litup = 0;
@@ -6637,11 +6667,7 @@ sub _initial_inertial{ return 1 };
 		s/.*?\.//;
 		$ele{$key} = $_;
 	    }
-	    my $epoch = $self->get('epoch');
-	    my $epoch_dayfrac = sprintf '%.8f', ($epoch / SECSPERDAY);
-	    $epoch_dayfrac =~ s/.*?\././;
-	    my $epoch_daynum = strftime '%y%j', gmtime ($epoch);
-	    $ele{epoch} = $epoch_daynum . $epoch_dayfrac;
+	    $ele{epoch} = $self->__make_tle_epoch();
 	    $ele{firstderivative} = sprintf (
 		'%.8f', $ele{firstderivative});
 	    $ele{firstderivative} =~ s/([-+]?)[\s0]*\./$1./;
@@ -6669,6 +6695,15 @@ sub _initial_inertial{ return 1 };
 	);
 	return $output;
     }
+}
+
+sub __make_tle_epoch {
+    my ( $self ) = @_;
+    my $epoch = $self->get('epoch');
+    my $epoch_dayfrac = sprintf '%.8f', ($epoch / SECSPERDAY);
+    $epoch_dayfrac =~ s/.*?\././;
+    my $epoch_daynum = strftime '%y%j', gmtime ($epoch);
+    return $epoch_daynum . $epoch_dayfrac;
 }
 
 #	$output = _make_tle_checksum($fmt ...);
@@ -6721,11 +6756,11 @@ eod
 
 sub _next_elevation_screen {
     my ( $sta, $pass_step, @args ) = @_;
-    my ( $suntim, $rise ) = $sta->next_elevation( @args );
-    $rise or $pass_step = - $pass_step;
+    my ( $suntim, $dawn ) = $sta->next_elevation( @args );
+    $dawn or $pass_step = - $pass_step;
     my $sun_screen = $suntim + $pass_step / 2;
-    return ( $suntim, $rise, $sun_screen,
-	$rise ? $sun_screen : $suntim,
+    return ( $suntim, $dawn, $sun_screen,
+	$dawn ? $sun_screen : $suntim,
     );
 }
 
@@ -7667,6 +7702,14 @@ needed) giving the last two digits of the launch year (in the range
 the order of the launch within the year, and one to three letters
 designating the "part" of the launch, with payload(s) getting the
 first letters, and spent boosters, debris, etc getting the rest.
+
+=item lazy_pass_position (boolean, static)
+
+This attribute tells the pass() method that the C<{azimuth}>,
+C<{elevation}>, and C<{range}> keys in the pass event hashes need not
+be generated.
+
+The default is 0 (i.e. false).
 
 =item limb (boolean, static)
 
