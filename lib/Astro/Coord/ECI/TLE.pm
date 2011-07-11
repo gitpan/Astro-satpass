@@ -199,7 +199,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.040';
+our $VERSION = '0.040_01';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -229,6 +229,12 @@ BEGIN {
 	PASS_EVENT_MAX
 	PASS_EVENT_SET
 	PASS_EVENT_APPULSE
+	PASS_EVENT_START
+	PASS_EVENT_END
+	PASS_VARIANT_VISIBLE_EVENTS
+	PASS_VARIANT_FAKE_MAX
+	PASS_VARIANT_START_END
+	PASS_VARIANT_NONE
 	BODY_TYPE_UNKNOWN
 	BODY_TYPE_DEBRIS
 	BODY_TYPE_ROCKET_BODY
@@ -370,6 +376,13 @@ eod
     appulse => 0,	# Maximum appulse to report.
     interval => 0,	# Interval for pass() positions, if positive.
     lazy_pass_position => 0,	# Position optional if true.
+    pass_variant => sub {
+	my ( $self, $name, $val ) = @_;
+	$val =~ m/ \A \d+ \z /smx
+	    or croak 'The pass_variant attribute must be an unsigned number';
+	$self->{$name} = $val;
+	return 0;
+    },
     ds50 => undef,	# Read-only
     epoch_dynamical => undef,	# Read-only
     rcs => 0,		# Radar cross-section
@@ -392,6 +405,7 @@ my %static = (
     lazy_pass_position => 0,
     limb => 1,
     model => 'model',
+    pass_variant => 0,
     reblessable => 1,
     visible => 1,
 );
@@ -1027,6 +1041,14 @@ The events are coded by the following manifest constants:
   PASS_EVENT_MAX => dualvar (5, 'max');
   PASS_EVENT_SET => dualvar (6, 'set');
   PASS_EVENT_APPULSE => dualvar (7, 'apls');
+  PASS_EVENT_START => dualvar( 11, 'start' );
+  PASS_EVENT_END => dualvar( 12, 'end' );
+
+The C<PASS_EVENT_START> and C<PASS_EVENT_END> events are not normally
+generated. You can get them in lieu of whatever events start and end the
+pass by setting C<PASS_VARIANT_START_END> in the C<pass_variant>
+attribute. Unless you are filtering out non-visible events, though, they
+are just the rise and set events under different names.
 
 The dualvar function comes from Scalar::Util, and generates values
 which are numeric in numeric context and strings in string context. If
@@ -1062,6 +1084,8 @@ the object:
   * interval	# Interval for pass() positions, if positive
   * lazy_pass_position # {azimuth}, {elevation} and {range} are
                 # optional if true (see note 1).
+  * pass_variant # Tweak what pass() returns; currently no
+		# effect unless 'visible' is true.
   * illum	# Source of illumination.
   * limb	# Whether lit when upper limb above horizon
   * twilight	# Distance of illuminator below horizon
@@ -1098,6 +1122,19 @@ use constant PASS_EVENT_RISE => dualvar (4, 'rise');
 use constant PASS_EVENT_MAX => dualvar (5, 'max');
 use constant PASS_EVENT_SET => dualvar (6, 'set');
 use constant PASS_EVENT_APPULSE => dualvar (7, 'apls');
+use constant PASS_EVENT_START => dualvar( 11, 'start' );
+use constant PASS_EVENT_END => dualvar( 12, 'end' );
+
+use constant PASS_VARIANT_VISIBLE_EVENTS => 0x01;
+use constant PASS_VARIANT_FAKE_MAX	=> 0x02;
+use constant PASS_VARIANT_START_END	=> 0x04;
+use constant PASS_VARIANT_NONE => 0x00;		# Must be 0.
+
+my @pass_variant_mask = (
+    PASS_VARIANT_START_END,
+    PASS_VARIANT_VISIBLE_EVENTS | PASS_VARIANT_FAKE_MAX |
+	PASS_VARIANT_START_END,
+);
 
 use constant SCREENING_HORIZON_OFFSET => deg2rad( -3 );
 
@@ -1138,6 +1175,8 @@ eod
     my $want_visible = $tle->get ('visible');
     my $appulse_dist = $tle->get ('appulse');
     my $debug = $tle->get ('debug');
+    my $pass_variant = $tle->get( 'pass_variant' ) &
+	$pass_variant_mask[ $want_visible ? 1 : 0 ];
 
     # We need the number of radians the satellite travels in a minute so
     # we can be slightly conservative determining whether the satellite
@@ -1213,8 +1252,8 @@ eod
 #	handle it if any, clear it, and on to the next iteration. We
 #	have to make the check on effective horizon as well as screening
 #	horizon, because maybe we are at the very end of the prediction
-#	period and the satellite makes it below the screening horizon
-#	but not the effective horizon before the end of the prediction
+#	period and the satellite makes it below the effective horizon
+#	but not the screening horizon before the end of the prediction
 #	period. Sigh.
 
 	if ( $elev < $screening_horizon ||
@@ -1342,30 +1381,6 @@ eod
 		next;
 	    };
 
-	    # Compute nearest approach to background bodies
-
-	    # Note (fortuitous discovery) the ISS travels 1.175
-	    # degrees per second at the zenith, so I need better
-	    # than 1 second resolution to detect a transit.
-
-	    foreach my $body (@sky) {
-		my $when = find_first_true ($time[1][0], $time[2][0],
-		    sub {$sta->angle ($body->universal ($_[0]),
-				    $tle->universal ($_[0])) <
-			    $sta->angle ($body->universal ($_[0] + .1),
-				    $tle->universal ($_[0] + .1))},
-		    .1);
-		my $angle = 
-		    $sta->angle ($body->universal ($when),
-			    $tle->universal ($when));
-		next if $angle > $appulse_dist;
-		push @time, [$when, PASS_EVENT_APPULSE,
-		    appulse => {angle => $angle, body => $body}];
-		warn <<eod if $debug;	## no critic (RequireCarping)
-	    $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S', localtime $time[$#time][0]]}
-eod
-	    }
-
 
 	    # Clear the original data.
 
@@ -1460,20 +1475,114 @@ eod
 		next;
 	    };
 
+	    # Put the events created thus far into order.
+
+	    @info = sort { $a->{time} <=> $b->{time} } @info;
+
+	    # If we want visible events only
+
+	    if ( $pass_variant & PASS_VARIANT_VISIBLE_EVENTS ) {
+
+		# Filter out anything that does not pass muster
+
+		@info = grep { $_->{illumination} == PASS_EVENT_LIT ||
+		    $_->{event} == PASS_EVENT_SHADOWED ||
+		    $_->{event} == PASS_EVENT_DAY
+		    } @info;
+
+		# If we want to fake a max event if that took place in
+		# darkness
+
+		if ( $pass_variant & PASS_VARIANT_FAKE_MAX &&
+		    ! grep { $_->{event} == PASS_EVENT_MAX } @info ) {
+
+		    # Given that the max got dropped, the fake max is
+		    # either the first or the last point.
+
+		    my ( $dup_inx, $splice_inx ) =
+			$info[0]{elevation} > $info[-1]{elevation} ?
+			( 0, 1 ) : ( -1, -1 );
+
+		    # Shallow clone, and change the event code to max.
+
+		    my $max = { %{ $info[$dup_inx] } };
+		    $max->{event} = PASS_EVENT_MAX;
+
+		    # Insert the max either just after the first, or
+		    # just before the last event, as the case may be.
+
+		    splice @info, $splice_inx, 0, $max;
+
+		}
+	    }
+
+	    # If we want the first and last events to be 'start' and
+	    # 'end', willy-nilly, hammer these codes into them.
+
+	    if ( $pass_variant & PASS_VARIANT_START_END ) {
+		$info[0]{event} = PASS_EVENT_START;
+		$info[-1]{event} = PASS_EVENT_END;
+	    }
+
+	    # Pick up the first and last event times, to use to bracket
+	    # future calculations.
+
+	    my $first_time = $info[0]{time};
+	    my $last_time = $info[-1]{time};
+	    my $number_of_events = @info;
+
+	    # Compute nearest approach to background bodies
+
+	    # Note (fortuitous discovery) the ISS travels 1.175
+	    # degrees per second at the zenith, so I need better
+	    # than 1 second resolution to detect a transit.
+
+	    foreach my $body (@sky) {
+		my $when = find_first_true ($first_time, $last_time,
+		    sub {$sta->angle ($body->universal ($_[0]),
+				    $tle->universal ($_[0])) <
+			    $sta->angle ($body->universal ($_[0] + .1),
+				    $tle->universal ($_[0] + .1))},
+		    .1);
+		my $angle = 
+		    $sta->angle ($body->universal ($when),
+			    $tle->universal ($when));
+		next if $angle > $appulse_dist;
+		my $illum = $info[0]{illumination};
+		foreach my $evt ( @info ) {
+		    $evt->{time} > $when
+			and last;
+		    $illum = $evt->{illumination};
+		}
+		my ( $azimuth, $elevation, $range ) = $sta->azel( $tle );
+		push @info, {
+		    body	=> $tle,
+		    event	=> PASS_EVENT_APPULSE,
+		    illumination	=> $illum,
+		    station	=> $sta,
+		    time	=> $when,
+		    azimuth	=> $azimuth,
+		    elevation	=> $elevation,
+		    range	=> $range,
+		    appulse	=> {
+			angle	=> $angle,
+			body	=> $body,
+		    },
+		};
+		warn <<"EOD" if $debug;	## no critic (RequireCarping)
+	    $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S',
+		localtime $time[$#time][0]]}
+EOD
+	    }
+
 	    # If we're verbose, calculate the points.
 
 	    if ( $verbose ) {
 
-		# We need to re-sort the events because illumination
-		# changes got appended to the rise, max, set, and
-		# appulse.
-
-		@info = sort { $a->{time} <=> $b->{time} } @info;
-
 		my $inx = 0;
 		my $illum = $info[$inx++]{illumination};
 		my %events = map { $_->{time} => 1 } @info;
-		for ( my $it = ceil( $sat_rise ); $it < $sat_set;
+		for ( my $it = ceil( $first_time ); $it < $last_time;
 		    $it += $verbose ) {
 
 		    # If we already have an event for this time, skip.
@@ -1489,15 +1598,10 @@ eod
 		    while ( $info[$inx]{time} < $it ) {
 			$illum = $info[$inx++]{illumination};
 		    }
-####		    my ( $azm, $elev, $rng ) = $sta->azel(
-####			$tle->universal( $it ) );
 		    push @info, {
-####			azimuth => $azm,
 			body => $tle,
-####			elevation => $elev,
 			event => PASS_EVENT_NONE,
 			illumination => $illum,
-####			range => $rng,
 			station => $sta,
 			time => $it,
 		    };
@@ -1508,9 +1612,10 @@ eod
 		}
 	    }
 
-#		Sort the data
+	    # Sort the data again if we have added events.
 
-	    @info = sort { $a->{time} <=> $b->{time} } @info;
+	    @info > $number_of_events
+		and @info = sort { $a->{time} <=> $b->{time} } @info;
 
 #	    Record the data for the pass.
 
@@ -7767,6 +7872,40 @@ The default is undef.
 =item name (string, parse (three-line sets only))
 
 This attribute contains the common name of the body.
+
+=item pass_variant (bits)
+
+This attribute tweaks the pass output as specified by its value, which
+should be the bitwise 'or' (i.e. C<|>) of the following values:
+
+* C<PASS_VARIANT_VISIBLE_EVENTS> - Specifies that events which are not
+visible (that is, which take place either during daylight or with the
+body in shadow) are not reported. Illumination changes, however, are
+always reported. This has no effect unless the C<visible> attribute is
+true.
+
+* C<PASS_VARIANT_FAKE_MAX> - Specifies that if
+C<PASS_VARIANT_VISIBLE_EVENTS> filters out the max, a new max event, at
+the same time as either the first or last reported event, will be
+inserted. This has no effect unless C<PASS_VARIANT_VISIBLE_EVENTS> is
+specified, and the C<visible> attribute is true.
+
+* C<PASS_VARIANT_START_END> - Specifies that the first and last events
+of the pass are to be identified as C<PASS_EVENT_START> and
+C<PASS_EVENT_END> respectively. If the C<visible> attribute is true and
+C<PASS_VARIANT_VISIBLE_EVENTS> is in effect, C<PASS_EVENT_START> will
+replace either C<PASS_EVENT_RISE> or C<PASS_EVENT_LIT>, and
+C<PASS_EVENT_END> will replace either C<PASS_EVENT_SET>,
+C<PASS_EVENT_SHADOWED>, or C<PASS_EVENT_DAY>. Otherwise, they replace
+C<PASS_EVENT_RISE> and C<PASS_EVENT_SET> respectively.
+
+* C<PASS_VARIANT_NONE> - Specifies that no pass variant processing take
+place.
+
+The above constants are not exported by default, but are exported by the
+C<:constants> tag.
+
+The default is C<PASS_VARIANT_NONE>
 
 =item rcs (string, parse)
 
