@@ -202,7 +202,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.044';
+our $VERSION = '0.045';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -658,6 +658,10 @@ horizon, though, it will appear here. One would expect the refraction
 right at the limb to be twice that calculated by Thorfinn's algorithm
 (used in the superclass) because the light travels to the Earth's
 surface and back out again.
+
+See the L<Astro::Coord::ECI|Astro::Coord::ECI> C<azel()> and
+C<azel_offset()> documentation for whether this class'
+C<correct_for_refraction()> method is actually called by those methods.
 
 =cut
 
