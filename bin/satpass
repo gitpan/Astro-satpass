@@ -38,7 +38,7 @@ $clipboard_unavailable = $IO::Clipboard::clipboard_unavailable;
 #	Initialization
 #
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -86,6 +86,7 @@ my %parm = (
 			# removed.
     local_coord => 'azel_rng',
     model => 'model',
+    pass_threshold => undef,
     prompt => 'satpass>',
 ##    simbad_url => 'simbad.harvard.edu',
 ##    simbad_version => 3,
@@ -141,6 +142,7 @@ my %mutator = (
     simbad_url => \&_set_unmodified,
     simbad_version => \&_set_simbad_version,
     singleton => \&_set_unmodified,
+    pass_threshold => \&_set_angle_or_undef,
     time_format => \&_set_unmodified,
 ##    timing => \&_set_unmodified,
     twilight => \&_set_twilight,  # 'civil', 'nautical', 'astronomical'
@@ -283,7 +285,7 @@ satpass $VERSION - Satellite pass predictor
 based on Astro::Coord::ECI @{[Astro::Coord::ECI->VERSION]}
 Perl $Config{version} on $Config{osname}
 
-Copyright 2005-2011 by Thomas R. Wyant, III.
+Copyright 2005-2012 by Thomas R. Wyant, III.
 
 Enter 'help' for help. See the help for terms of use.
 
@@ -1225,14 +1227,8 @@ sub _geocode_height {
 #	the data returned by -all). This will have no effect of -all is
 #	specified.
 
-#	The -yaml option is to feed the parsing logic data from a file
-#	rather than downloading it from the USGS. This is for debugging
-#	purposes only, and will remain undocumented and unsupported. The
-#	argument is the name of the YAML file. Either YAML or YAML::Syck
-#	can be used, with the latter being preferred.
-
 BEGIN {
-$cmdlgl{height} = [qw{all retry_on_zero=i source_layer=s yaml=s}];
+$cmdlgl{height} = [ qw{ all retry_on_zero=i source_layer=s }];
 $cmdlgl{height_af} = $cmdlgl{height};
 $cmdlgl{height_as} = $cmdlgl{height};
 $cmdlgl{height_ca} = $cmdlgl{height};
@@ -1588,6 +1584,7 @@ eod
 
     my $horizon = deg2rad ($parm{horizon});
     my $appulse = deg2rad ($parm{appulse});
+    my $pass_threshold = deg2rad( $parm{pass_threshold} );
 
 #	Print the header
 
@@ -1617,6 +1614,7 @@ eod
 	    interval => $parm{verbose} ? $pass_step : 0,
 	    lazy_pass_position => 1,
 	    model => $model,
+	    pass_threshold => $pass_threshold,
 	    twilight => $parm{_twilight},
 	    visible => $parm{visible},
 	);
@@ -1907,6 +1905,13 @@ sub _set_angle {
 $parm{$_[0]} = _parse_angle ($_[1]);
 }
 
+sub _set_angle_or_undef {
+    defined $_[1]
+	and $_[1] ne 'undef'
+	and goto &_set_angle;
+    $parm{$_[0]} = undef;
+}
+
 sub _set_ellipsoid {
 Astro::Coord::ECI->set (ellipsoid => $_[1]);
 $parm{$_[0]} = $_[1];
@@ -2067,7 +2072,7 @@ my $verb = lc (shift @_ || '');
 
 if (!$verb) {
     foreach my $body (@sky) {
-	if ( _instance( $body, 'Astro::Coord::ECI::Star' ) ) {
+	if ( __instance( $body, 'Astro::Coord::ECI::Star' ) ) {
 	    my ($ra, $dec, $rng, $pmra, $pmdec, $vr)  = $body->position ();
 	    $rng /= PARSEC;
 	    $pmra = rad2deg ($pmra / 24 * 360 * cos ($ra)) * SPY2DPS;
@@ -2098,7 +2103,7 @@ eod
     my $class = 'Astro::Coord::ECI::' .
 	($special ? ucfirst ($lcn) : 'Star');
     foreach my $body (@sky) {
-	return if _instance($body, $class) &&
+	return if __instance($body, $class) &&
 		($special || $lcn eq lc $body->get ('name'));
 	}
     my $body = $class->new (debug => $parm{debug});
@@ -2152,7 +2157,7 @@ eod
     my $name = $_[0];
     my $lcn = lc $_[0];
     foreach my $body (@sky) {
-	next unless _instance($body, 'Astro::Coord::ECI::Star') &&
+	next unless __instance($body, 'Astro::Coord::ECI::Star') &&
 		$lcn eq lc $body->get ('name');
 	die <<eod;
 Error - The sky already contains $_[0]. If you want to
@@ -3786,6 +3791,11 @@ macros can be defined to issue frequently-used commands.
  satpass> exit
 
 =head1 NOTICE
+
+This release supports the new C<pass_threshold> attribute of
+L<Astro::Coord::ECI::TLE|Astro::Coord::ECI::TLE>, which provides a way
+to decouple how high a pass need to be to be reported from how high the
+horizon is.
 
 The use of the L<SOAP::Lite|SOAP::Lite> interface to
 L<http://geocoder.us> is deprecated in favor of the
@@ -5579,6 +5589,15 @@ take about 15% longer.
 
 The default is 0 (i.e. false).
 
+=for html <a name="pass_threshold"></a>
+
+=item pass_threshold (angle or undef)
+
+This parameter corresponds to the
+L<Astro::Coord::ECI::TLE|Astro::Coord::ECI::TLE> C<pass_threshold>
+attribute.  It is set in degrees. It can also be set to the C<undef>
+value by specifying the string C<'undef'> (unquoted) as its value.
+
 =for html <a name="time_format"></a>
 
 =item time_format (string)
@@ -5903,7 +5922,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

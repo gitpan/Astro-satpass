@@ -3,377 +3,326 @@ package main;
 use strict;
 use warnings;
 
-use Astro::Coord::ECI::Utils qw{:all};
 use POSIX qw{strftime floor};
-use Test;
-
-BEGIN {plan tests => 57}
+use Test::More 0.88;
+use Time::Local;
 
 ##use constant ASTRONOMICAL_UNIT => 149_597_870; # Meeus, Appendix 1, pg 407
 ##use constant EQUATORIALRADIUS => 6378.14;	# Meeus page 82.
 ##use constant PERL2000 => timegm (0, 0, 12, 1, 0, 100);
 use constant TIMFMT => '%d-%b-%Y %H:%M:%S';
 
-my $test = 0;
+sub u_cmp_eql (@);
+sub u_ok (@);
 
+require_ok 'Astro::Coord::ECI::Utils'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Utils';
 
-#	Tests 1 - 2: Perl time to Julian days since J2000.0
-#	Tests: jday2000()
+require_ok 'Astro::Coord::ECI'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI';
 
-#	Based on the table on Meeus' page 62.
+require_ok 'Astro::Coord::ECI::Moon'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Moon';
 
-foreach ([timegm (0, 0, 12, 1, 0, 100), 0],
-	[timegm (0, 0, 0, 1, 0, 99), -365.5],
-	) {
-    $test++;
-    my ($time, $expect) = @$_;
-    my $got = jday2000 ($time);
-    print <<eod;
-# Test $test: convert time to days since Julian 2000.0
-#     Universal: @{[strftime TIMFMT, gmtime $time]}
-#      Expected: $expect
-#           Got: $got
-eod
-    ok ($expect == $got);
-    }
+require_ok 'Astro::Coord::ECI::Star'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Star';
 
+require_ok 'Astro::Coord::ECI::Sun'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Sun';
 
-#	Tests 3 - 4: Perl time to Julian day
-#	Tests: julianday()
+require_ok 'Astro::Coord::ECI::TLE'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::TLE';
 
-#	Based on the table on Meeus' page 62.
+require_ok 'Astro::Coord::ECI::TLE::Iridium'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Iridium';
 
-foreach ([timegm (0, 0, 12, 1, 0, 100), 2451545.0],
-	[timegm (0, 0, 0, 1, 0, 99), 2451179.5],
-	) {
-    $test++;
-    my ($time, $expect) = @$_;
-    my $got = julianday ($time);
-    print <<eod;
-# Test $test: convert time to Julian day
-#     Universal: @{[strftime TIMFMT, gmtime $time]}
-#      Expected: $expect
-#           Got: $got
-eod
-    ok ($expect == $got);
-    }
+require_ok 'Astro::Coord::ECI::TLE::Set'
+    or BAIL_OUT 'Can not continue without Astro::Coord::ECI::Set';
 
+u_ok embodies => [ qw{ Astro::Coord::ECI::TLE::Iridium
+    Astro::Coord::ECI::TLE } ],
+    'An Iridium embodies a TLE';
 
-#	Tests 5 - 6: Perl time to Julian centuries since J2000.0
-#	Tests: jcent2000()
+u_cmp_eql deg2rad => 45, .7853981634, '%.10f', 'deg2rad( 45 )';
 
-#	Based on Meeus' examples 12.a and 12.b.
+u_cmp_eql deg2rad => undef, undef, undef, 'deg2rad( undef )';
 
-foreach ([timegm (0, 0, 0, 10, 3, 87), -.127296372348, '%.12f'],
-	[timegm (0, 21, 19, 10, 3, 87), -.12727430, '%.8f'],
-	) {
-    $test++;
-    my ($time, $expect, $tplt) = @$_;
-    my $got = jcent2000 ($time);
-    my $check = sprintf $tplt, $got;
-    print <<eod;
-# Test $test: convert time to Julian centuries since Julian 2000.0
-#     Universal: @{[strftime TIMFMT, gmtime $time]}
-#      Expected: $expect
-#           Got: $got
-eod
-    ok ($expect == $check);
-    }
+u_cmp_eql rad2deg => 1, 57.295779513, '%.9f', 'rad2deg( 1 )';
 
+u_cmp_eql rad2deg => undef, undef, undef, 'rad2deg( undef )';
 
-#	Tests 7 - 8: thetag
-#	Tests: thetag()
+u_cmp_eql acos => 1, 0, '%.6f', 'acos( 1 )';
 
-#	Based on Meeus' examples 12a and 12b, pages 88 and 89.
+u_cmp_eql acos => 0, atan2( 1, 0 ), '%.6f', 'acos( 0 )';
 
-foreach ([timegm (0, 0, 0, 10, 3, 87), 3.450397161537],
-	[timegm (0, 21, 19, 10, 3, 87), 2.246899761682]) {
+u_cmp_eql asin => 0, 0, '%.6f', 'asin( 0 )';
 
-    $test++;
-    my ($time, $expect) = @$_;
-    my $tolerance = 1e-6;
-    my $got = thetag ($time);
-    print <<eod;
-# Test $test: Hour angle of Greenwich (Thetag)
-#     Universal: @{[strftime TIMFMT, gmtime $time]}
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs (($got - $expect) / $expect) < $tolerance);
-    }
+u_cmp_eql asin => 1, atan2( 1, 0 ), '%.6f', 'asin( 1 )';
 
+u_cmp_eql jday2000 => timegm( 0, 0, 12, 1, 0, 100 ), 0,
+    undef, 'jday2000: Noon Jan 1 2000 => 0 (Meeus pg 62)';
 
-#	Test 9: theta0
+u_cmp_eql jday2000 => timegm( 0, 0, 0, 1, 0, 99 ), -365.5,
+    undef, 'jday2000: Midnight Jan 1 1999 => -365.5 (Meeus pg 62)';
 
-#	Based on Meeus' examples 12a and 12b, pages 88 and 89.
-#	Tests: theta0()
+u_cmp_eql julianday => timegm( 0, 0, 12, 1, 0, 100 ), 2451545.0,
+    undef, 'julianday: Noon Jan 1 2000 => 2451545 (Meeus pg 62)';
 
-foreach ([timegm (0, 21, 19, 10, 3, 87), 3.450397161537]) {
+u_cmp_eql julianday => timegm( 0, 0, 12, 1, 0, 100 ), 2451545.0,
+    undef, 'julianday: Midnight Jan 1 1999 => 2451179.5 (Meeus pg 62)';
 
-    $test++;
-    my ($time, $expect) = @$_;
-    my $tolerance = 1e-6;
-    my $got = theta0 ($time);
-    print <<eod;
-# Test $test: Hour angle of Greenwich at 0 UT (Theta0)
-#     Universal: @{[strftime TIMFMT, gmtime $time]}
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs (($got - $expect) / $expect) < $tolerance);
-    }
+u_cmp_eql jcent2000 => timegm( 0, 0, 0, 10, 3, 87 ), -.127296372348,
+    '%.12f', 'jcent2000: Midnight Nov 3 1987: Meeus ex 12.a pg 88';
 
+u_cmp_eql jcent2000 => timegm( 0, 21, 19, 10, 3, 87 ), -.12727430,
+    '%.8f', 'jcent2000: 19:21 Nov 3 1987: Meeus ex 12.b pg 89';
 
-#	Test 10: Ecliptic longitude of ascending node of moon's mean
-#	orbit.
-#	Tests: omega (and jcent2000).
+u_cmp_eql thetag => timegm( 0, 0, 0, 10, 3, 87 ), 3.450397,
+    '%.6f', 'thetag: Midnight Nov 3 1987: Meeus ex 12.a pg 88';
 
-#	Based on Meeus' example 22.a.
+u_cmp_eql thetag => timegm( 0, 21, 19, 10, 3, 87 ), 2.246900,
+    '%.6f', 'thetag: 19:21 Nov 3 1987: Meeus ex 12.b pg 89';
 
-foreach ([timegm (0, 0, 0, 10, 3, 87), 11.2531],
-	) {
-    $test++;
-    my ($time, $expect) = @$_;
-    my $got = omega ($time);
-    $expect = deg2rad ($expect);
-    my $tolerance = 1.e-5;
-    print <<eod;
-# Test $test: Ecliptic longitude of Moon's mean ascending node
-#          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs (($got - $expect) / $expect) < $tolerance);
-    }
+u_cmp_eql theta0 => timegm( 0, 21, 19, 10, 3, 87 ), 3.450397,
+    '%.6f', 'theta0: 19:21 Nov 3 1987: Meeus ex 12.b pg 89';
 
+u_cmp_eql omega => timegm( 0, 0, 0, 10, 3, 87 ), .19640,
+    '%.5f', 'omega: Midnight Nov 3 1987: Meeus ex 22.a';
 
-#	Tests 11-12: Nutation in longitude and obliquity.
-#	Tests: nutation_in_longitude, nutation_in_obliquity (and
-#		jcent2000).
+u_cmp_eql nutation_in_longitude => timegm( 0, 0, 0, 10, 3, 87 ),
+    -1.8364e-5, '%.5f',	# Tolerance .5 seconds of arc
+    'nutation_in_longitude: Midnight Nov 3 1987: Meeus ex 22.a';
 
-#	Based on Meeus' example 22.a.
+u_cmp_eql nutation_in_obliquity => timegm( 0, 0, 0, 10, 3, 87 ),
+    4.5781e-5, '%.6f',	# Tolerance .1 seconds of arc
+    'nutation_in_obliquity: Midnight Nov 3 1987: Meeus ex 22.a';
 
-foreach ([longitude => timegm (0, 0, 0, 10, 3, 87), -3.788/3600, .5/3600],
-	[obliquity => timegm (0, 0, 0, 10, 3, 87), 9.443/3600, .1/3600],
-	) {
-    $test++;
-    my ($what, $time, $expect, $tolerance) = @$_;
-    my $method = Astro::Coord::ECI::Utils->can("nutation_in_$what");
-    my $got = $method->($time);
-    $expect = deg2rad ($expect);
-    $tolerance = deg2rad ($tolerance);
-    print <<eod;
-# Test $test: Nutation in $what
-#          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs ($got - $expect) < $tolerance);
-    }
+u_cmp_eql equation_of_time => timegm( 0, 0, 0, 13, 9, 92 ),
+    13 * 60 + 42.7, '%.1f',	# Tolerance .1 second
+    'equation_of_time: Midnight Oct 13 1992: Meeus ex 28b';
 
+u_cmp_eql obliquity => timegm( 0, 0, 0, 10, 3, 87 ), 0.409167475225493,
+    '%.5f', 'obliquity: Midnight Nov 3 1987: Meeus ex 22.a';
 
-#	Test 13: Equation of time.
-#	Tests: equation_of_time() (and obliquity()).
+u_cmp_eql intensity_to_magnitude => 500, -6.75, '%.2f',
+    'intensity_to_magnitude: 500: Meeus ex 56.e';
 
-#	This test is based on Meeus' example 28.b.
+u_cmp_eql atmospheric_extinction => [
+    0.174532925199433,	# 80 degrees below zenith, in radians elevation
+    0,			# Height above sea level, kilometers
+], 1.59, '%.2f',
+'atmospheric_extinction: elev 10 deg, hgt 0 km: Green tbl 1a';
 
-foreach ([timegm (0, 0, 0, 13, 9, 92), 13 * 60 + 42.7, .1],
-	) {
-    my ($time, $expect, $tolerance) = @$_;
-    my $got = equation_of_time ($time);
-    $test++;
-    print <<eod;
-# Test $test: Equation of time
-#          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
-#      Expected: $expect seconds
-#           Got: $got seconds
-#     Tolerance: $tolerance seconds
-eod
-    my $tplt = "%${tolerance}f";
-    ok (sprintf ($tplt, $expect) == sprintf ($tplt, $got));
-    }
+u_cmp_eql atmospheric_extinction => [
+    0.785398163397448,	# 45 degrees below zenith, in radians elevation
+    .5,			# Height above sea level, kilometers
+], 0.34, '%.2f',
+'atmospheric_extinction: elev 45 deg, hgt 0.5 km: Green tbl 1a';
 
+u_cmp_eql atmospheric_extinction => [
+    1.55334303427495,	# 1 degree below zenith, in radians elevation
+    1,			# Height above sea level, kilometers
+], 0.21, '%.2f',
+'atmospheric_extinction: elev 45 deg, hgt 0.5 km: Green tbl 1a';
 
+u_cmp_eql date2jd => [ 4.81, 9, 57 ], 2436116.31,
+    '%.2f', 'date2jd: Oct 4.81, 1957: Meeus pp 60ff';
 
-#	Test 14: Obliquity of the ecliptic.
-#	Tests: obliquity() (and nutation_in_obliquity() and
-#		jcent2000())
+u_cmp_eql date2jd => [ 12, 27, 0, -1567 ], 1842713,
+    '%.2f', 'date2jd: Noon Jan 27 AD 333: Meeus pp 60ff';
 
-#	Based on Meeus' example 22.a.
+u_cmp_eql jd2date => 2436116.31, [ 0, 4.81 ], '%.2f',
+    'jd2date: day of jd 2436116.31: Meeus pp 60ff';
 
-foreach ([timegm (0, 0, 0, 10, 3, 87), (36.850 / 60 + 26) / 60 + 23],
-	) {
-    $test++;
-    my ($time, $expect) = @$_;
-    my $got = obliquity ($time);
-    $expect = deg2rad ($expect);
-    my $tolerance = 1e-6;
-    print <<eod;
-# Test $test: Obliquity of the ecliptic
-#          Time: @{[strftime TIMFMT, gmtime $time]} (dynamical)
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs (($got - $expect) / $expect) < $tolerance);
-    }
+u_cmp_eql jd2date => 2436116.31, [ 1, 9 ], '%.2f',
+    'jd2date: month of jd 2436116.31: Meeus pp 60ff';
 
+u_cmp_eql jd2date => 2436116.31, [ 2, 57 ], '%.2f',
+    'jd2date: year of jd 2436116.31: Meeus pp 60ff';
 
-#	Test 15: Light intensity to magnitude.
-#	Tests: intensity_to_magnitude
+u_cmp_eql jd2date => 1842713.0, [ 0, 27.5 ], '%.2f',
+    'jd2date: day of jd 1842713.0: Meeus pp 60ff';
 
-#	Based on Meeus' example 56.e.
+u_cmp_eql jd2date => 1842713.0, [ 1, 0 ], '%.2f',
+    'jd2date: month of jd 1842713.0: Meeus pp 60ff';
 
-foreach ([500, -6.75, 0.01]) {
-    $test++;
-    my ($ratio, $expect, $tolerance) = @$_;
-    my $got = intensity_to_magnitude ($ratio);
-    print <<eod;
-# Test $test: Light intensity to magnitude
-#      Expected: $expect
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-    ok (abs ($got - $expect) <= $tolerance);
-    }
+u_cmp_eql jd2date => 1842713.0, [ 2, -1567 ], '%.2f',
+    'jd2date: year of jd 1842713.0: Meeus pp 60ff';
 
-#	Tests 16 - 18: Atmospheric extinction
-#	Tests: atmospheric_extinction
+u_cmp_eql jd2date => 1507900.13, [ 0, 28.63 ], '%.2f',
+    'jd2date: day of jd 1507900.13: Meeus pp 60ff';
 
-#	Based on Green's extinction table 1a
+u_cmp_eql jd2date => 1507900.13, [ 1, 4 ], '%.2f',
+    'jd2date: month of jd 1507900.13: Meeus pp 60ff';
 
-foreach ([80, 0, 1.59], [45, .5, 0.34], [1, 1, 0.21]) {
-    $test++;
-    my ($Z, $height, $expect) = @$_;
-    my $elevation = deg2rad (90 - $Z);
-    my $got = atmospheric_extinction ($elevation, $height);
-    print <<eod;
-# Test $test: Atmospheric extinction
-#    Conditions: Z = $Z, height = $height
-#      Expected: $expect
-#           Got: $got
-eod
-    ok (abs ($got - $expect) <= .01);
-    }
+u_cmp_eql jd2date => 1507900.13, [ 2, -2484 ], '%.2f',
+    'jd2date: year of jd 1507900.13: Meeus pp 60ff';
 
-# Tests 19 -  : Julian dates
+use constant PERL2000 => timegm (0, 0, 12, 1, 0, 100);
 
-#	Based on Meeus pp60ff
+u_cmp_eql date2epoch => [ 12, 1, 0, 100 ], PERL2000, '%.1f',
+    'date2epoch: Noon Jan 1 2000';
 
-foreach (
-    [date2jd => [
-	4.81,
-	9,
-	57,		# 1957
-    ], [jd => [ 2436116.31, .005] ]],
-    [date2jd => [
-	12,
-	27,
-	0,
-	-1567,		# 333
-    ], [jd => 1842713.0]],
-    [jd2date => [2436116.31], [
-	day => [ 4.81, .005],
-	mon => 9,
-	yr => 57,	# 1957
-    ]],
-    [jd2date => [1842713.0], [
-	day => 27.5,
-	mon => 0,
-	yr => -1567,	# 333
-    ]],
-    [jd2date => [1507900.13], [
-	day => [ 28.63, .005],
-	mon => 4,
-	yr => -2484,	# -584
-    ]],
-    [date2epoch => [
-	12,
-	1,
-	0,
-	100,		# 2000
-    ], [epoch => PERL2000]],
-    [epoch2datetime => [PERL2000], [
-	sec => 0,
-	min => 0,
-	hr => 12,
-	day => 1,
-	mon => 0,
-	yr => 100,	# 2000
-    ]],
-    [jd2datetime => [2434923.5], [	# Meeus example 7.e.
-	sec => 0,
-	min => 0,
-	hr => 0,
-	day => 30,
-	mon => 5,
-	yr => 54,	# 1954
-	wday => 3,	# Wednesday
-    ]],
-    [jd2datetime => [2443826.5], [	# Meeus example 7.f.
-	sec => 0,
-	min => 0,
-	hr => 0,
-	day => 14,
-	mon => 10,
-	yr => 78,	# 1978
-	wday => undef,	# Not specified in example.
-	yday => 317,	# 1 less because 0-based.
-    ]],
-    [jd2datetime => [2447273.5], [	# Meeus example 7.g.
-	sec => 0,
-	min => 0,
-	hr => 0,
-	day => 22,
-	mon => 3,
-	yr => 88,	# 1978
-	wday => undef,	# Not specified in example.
-	yday => 112,	# 1 less because 0-based.
-    ]],
-) {
-    my ($method, $args, $want) = @$_;
-    my @want = @$want;
-    my $items = @want / 2;
-    my $code = Astro::Coord::ECI::Utils->can ($method)
-	or die "Fatal - Astro::Coord::ECI::Utils::'$method' not found";
-    print <<eod;
-#
-# Testing $method (@{[join ', ', @$args]})
-eod
-    my @got = $code->(@$args);
-    @got > $items and splice @got, $items;
-    foreach my $got (@got) {
-	my $name = shift @want;
-	defined (my $want = shift @want) or next;
-	my $tolerance;
-	if ( ref $want eq 'ARRAY' ) {
-	    ( $want, $tolerance ) = @{ $want };
-	} else {
-	    $tolerance = $want;
-	    $tolerance =~ s/\.$//;
-	    if ($want =~ m/\./) {
-		$tolerance =~ s/.*\././;
-		$tolerance =~ s/\d/0/g;
-		$tolerance =~ s/0$/1/;
+u_cmp_eql epoch2datetime => PERL2000, [ 0, 0 ], '%.1f',
+    'epoch2datetime: seconds of PERL2000';
+
+u_cmp_eql epoch2datetime => PERL2000, [ 1, 0 ], '%.1f',
+    'epoch2datetime: minutes of PERL2000';
+
+u_cmp_eql epoch2datetime => PERL2000, [ 2, 12 ], '%.1f',
+    'epoch2datetime: hours of PERL2000';
+
+u_cmp_eql epoch2datetime => PERL2000, [ 3, 1 ], '%.1f',
+    'epoch2datetime: days of PERL2000';
+
+u_cmp_eql epoch2datetime => PERL2000, [ 4, 0 ], '%.1f',
+    'epoch2datetime: months of PERL2000';
+
+u_cmp_eql epoch2datetime => PERL2000, [ 5, 100 ], '%.1f',
+    'epoch2datetime: years of PERL2000';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 0, 0 ], '%1f',
+    'jd2datetime: seconds of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 1, 0 ], '%1f',
+    'jd2datetime: minutes of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 2, 0 ], '%1f',
+    'jd2datetime: hours of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 3, 30 ], '%1f',
+    'jd2datetime: days of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 4, 5 ], '%1f',
+    'jd2datetime: months of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 5, 54 ], '%1f',
+    'jd2datetime: years of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2434923.5, [ 6, 3 ], '%1f',
+    'jd2datetime: weekday of 2434923.5: Meeus ex 7.e.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 0, 0 ], '%1f',
+    'jd2datetime: seconds of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 1, 0 ], '%1f',
+    'jd2datetime: minutes of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 2, 0 ], '%1f',
+    'jd2datetime: hours of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 3, 14 ], '%1f',
+    'jd2datetime: days of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 4, 10 ], '%1f',
+    'jd2datetime: months of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 5, 78 ], '%1f',
+    'jd2datetime: years of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2443826.5, [ 7, 317 ], '%1f',
+    'jd2datetime: year day of 2443826.5: Meeus ex 7.f.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 0, 0 ], '%1f',
+    'jd2datetime: seconds of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 1, 0 ], '%1f',
+    'jd2datetime: minutes of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 2, 0 ], '%1f',
+    'jd2datetime: hours of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 3, 22 ], '%1f',
+    'jd2datetime: days of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 4, 3 ], '%1f',
+    'jd2datetime: months of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 5, 88 ], '%1f',
+    'jd2datetime: years of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql jd2datetime => 2447273.5, [ 7, 112 ], '%1f',
+    'jd2datetime: year day of 2447273.5: Meeus ex 7.g.';
+
+u_cmp_eql distsq => [ [ 3, 4 ], [ 0, 0 ] ], 25, undef,
+    'distsq( [ 3, 4 ] )';
+
+u_cmp_eql vector_magnitude => [ [ 3, 4 ] ], 5, undef,
+    'vector_magnitude( [ 3, 4 ] )';
+
+u_cmp_eql vector_unitize => [ [ 3, 4 ] ], [ 0, .6 ], undef,
+    'vector_unitize( [ 3, 4 ] ): X component';
+
+u_cmp_eql vector_unitize => [ [ 3, 4 ] ], [ 1, .8 ], undef,
+    'vector_unitize( [ 3, 4 ] ): Y component';
+
+u_cmp_eql vector_dot_product => [ [ 1, 2, 3 ], [ 6, 5, 4 ] ], 28, undef,
+    'vector_dot_product( [ 1, 2, 3 ], [ 6, 5, 4 ] )';
+
+u_cmp_eql vector_cross_product => [ [ 1, 2, 3 ], [ 6, 5, 4 ] ],
+    [ 0, -7 ], undef,
+    'vector_cross_product( [ 1, 2, 3 ], [ 6, 5, 4 ] ): X component';
+
+u_cmp_eql vector_cross_product => [ [ 1, 2, 3 ], [ 6, 5, 4 ] ],
+    [ 1, 14 ], undef,
+    'vector_cross_product( [ 1, 2, 3 ], [ 6, 5, 4 ] ): Y component';
+
+u_cmp_eql vector_cross_product => [ [ 1, 2, 3 ], [ 6, 5, 4 ] ],
+    [ 2, -7 ], undef,
+    'vector_cross_product( [ 1, 2, 3 ], [ 6, 5, 4 ] ): Z component';
+
+u_cmp_eql find_first_true => [
+    0, 1, sub{ sin( $_[0] ) >= sin( .5 ) }, .0001 ], .5, '%.4f',
+    'find_first_true looking for sin( $x ) >= sin( .5 )';
+
+done_testing;
+
+sub u_cmp_eql (@) {
+    my ( $sub, $arg, $want, $tplt, $title ) = @_;
+    'ARRAY' eq ref $arg
+	or $arg = [ $arg ];
+    if ( my $code = Astro::Coord::ECI::Utils->can( $sub ) ) {
+	my $got;
+	if ( 'ARRAY' eq ref $want ) {
+	    ( my $inx, $want ) = @{ $want };
+	    my @rslt = $code->( @{ $arg } );
+	    if ( 1 == @rslt && 'ARRAY' eq ref $rslt[0] ) {
+		$got = $rslt[0][$inx];
 	    } else {
-		$tolerance = 1;
+		$got = $rslt[$inx];
 	    }
-	    $tolerance /= 2;
+	} else {
+	    $got = $code->( @{ $arg } );
 	}
-	$test++;
-	print <<eod;
-#
-# Test $test - $method output $name
-#      Expected: $want
-#           Got: $got
-#     Tolerance: $tolerance
-eod
-	ok (abs ($want - $got) <= $tolerance);
+	if ( ! defined $want ) {
+	    @_ = ( $got, $want, $title );
+	    goto &is;
+	} else {
+	    defined $tplt
+		and ( $want, $got ) = map { sprintf $tplt, $_ } ( $want, $got );
+	    @_ = ( $got, '==', $want, $title );
+	    goto &cmp_ok;
+	}
+    } else {
+	@_ = "Astro::Coord::ECI::Utils does not have subroutine $sub()";
+	goto &fail;
+    }
+}
+
+sub u_ok (@) {
+    my ( $sub, $arg, $title ) = @_;
+    if ( my $code = Astro::Coord::ECI::Utils->can( $sub ) ) {
+	'ARRAY' eq ref $arg
+	    or $arg = [ $arg ];
+	my $got = $code->( @{ $arg } );
+	@_ = ( $got, $title );
+	goto &ok;
+    } else {
+	@_ = "Astro::Coord::ECI::Utils does not have subroutine $sub()";
+	goto &fail;
     }
 }
 
 1;
+
+# ex: set textwidth=72 :

@@ -43,7 +43,7 @@ package Astro::Coord::ECI::Moon;
 use strict;
 use warnings;
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 
 use base qw{Astro::Coord::ECI};
 
@@ -114,7 +114,7 @@ otherwise.
 sub new {
     my ($class, @args) = @_;
     ref $class and $class = ref $class;
-    if ( $Singleton && $weaken && _classisa( $class, __PACKAGE__ ) ) {
+    if ( $Singleton && $weaken && __classisa( $class, __PACKAGE__ ) ) {
 	if ($object) {
 	    $object->set (@args) if @args;
 	    return $object;
@@ -547,7 +547,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

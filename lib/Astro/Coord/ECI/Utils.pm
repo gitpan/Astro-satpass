@@ -94,7 +94,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -137,12 +137,12 @@ our @EXPORT_OK = ( qw{
 	min mod2pi nutation_in_longitude nutation_in_obliquity obliquity
 	omega rad2deg tan theta0 thetag vector_cross_product
 	vector_dot_product vector_magnitude vector_unitize
-       	_classisa _instance },
+       	__classisa __instance },
 	@time_routines );
 
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
-    params => [ qw{ _classisa _instance } ],
+    params => [ qw{ __classisa __instance } ],
     time => \@time_routines,
 );
 
@@ -293,8 +293,10 @@ If less than 6 arguments are provided, zeroes will be prepended to the
 argument list as needed.
 
 The functionality is the same as B<Time::Local::timegm>, but this
-function lacks timegm's limited date range. These days, though,
-Time::y2038::timegm may be preferred over this subroutine.
+function lacks timegm's limited date range under Perls before 5.12.0. If
+you have Perl 5.12.0 or better, the core L<Time::Local|Time::Local>
+C<timegm()> will probably do what you want.  If you have an earlier
+Perl, L<Time::y2038|Time::y2038> C<timegm()> may do what you want.
 
 =cut
 
@@ -309,11 +311,12 @@ sub date2epoch {
 
 =item $rad = deg2rad ($degr)
 
-This subroutine converts degrees to radians.
+This subroutine converts degrees to radians. If the argument is
+C<undef>, C<undef> will be returned.
 
 =cut
 
-sub deg2rad {return $_[0] * PI / 180}
+sub deg2rad { return defined $_[0] ? $_[0] * PI / 180 : undef }
 
 
 =item $value = distsq (\@coord1, \@coord2)
@@ -404,8 +407,11 @@ time) indicator which is always 0 to be consistent with gmtime.
 If called in scalar context, it returns the date formatted by
 POSIX::strftime, using the format string in $DATETIMEFORMAT.
 
-The functionality is similar to gmtime, but lacks gmtime's limited date
-range.
+The functionality is the same as the core C<gmtime()>, but this function
+lacks gmtime's limited date range under Perls before 5.12.0. If you have
+Perl 5.12.0 or better, the core C<gmtime()> will probably do what you
+want.  If you have an earlier Perl, L<Time::y2038|Time::y2038>
+C<gmtime()> may do what you want.
 
 The input must convert to a non-negative Julian date. The exact lower
 limit depends on the system, but is computed by -(JD_OF_EPOCH * 86400).
@@ -860,11 +866,11 @@ sub omega {
 =item $degrees = rad2deg ($radians)
 
 This subroutine converts the given angle in radians to its equivalent
-in degrees.
+in degrees. If the argument is C<undef>, C<undef> will be returned.
 
 =cut
 
-sub rad2deg {return $_[0] / PI * 180}
+sub rad2deg { return defined $_[0] ? $_[0] / PI * 180 : undef }
 
 =item $value = tan ($angle)
 
@@ -987,26 +993,26 @@ sub vector_unitize {
     return [ map { $_ / $mag } @{ $b } ];
 }
 
-#	_classisa( 'Foo', 'Bar' );
+#	__classisa( 'Foo', 'Bar' );
 #
 #	Returns true if Foo->isa( 'Bar' ) is true, and false otherwise.
 #	In particular, returns false if the first argument is a
 #	reference.
 
-sub _classisa {
+sub __classisa {
     my ( $invocant, $class ) = @_;
     ref $invocant and return;
     defined $invocant or return;
     return $invocant->isa( $class );
 }
 
-#	_instance( $foo, 'Bar' );
+#	__instance( $foo, 'Bar' );
 #
 #	Returns true if $foo is an instance of 'Bar', and false
 #	otherwise. In particular, returns false if $foo is not a
 #	reference, or if it is not blessed.
 
-sub _instance {
+sub __instance {
     my ( $object, $class ) = @_;
     ref $object or return;
     blessed( $object ) or return;
@@ -1141,7 +1147,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

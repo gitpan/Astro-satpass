@@ -202,7 +202,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -407,6 +407,14 @@ eod
     rcs => 0,		# Radar cross-section
     tle => undef,	# Read-only
     illum => \&_set_illum,
+    pass_threshold => sub {
+	my ($self, $name, $value) = @_;
+	not defined $value
+	    or looks_like_number( $value )
+	    or carp "Invalid $name '$value'";
+	$self->{$name} = $value;
+	return 0;
+    },
     reblessable => sub {
 	my $doit = !$_[0]{$_[1]} && $_[2] && $_[0]->get ('id');
 	$_[0]{$_[1]} = $_[2];
@@ -1217,6 +1225,7 @@ eod
     my $pass_step = 60;
     my $horizon = $tle->get ('horizon');
     my $effective_horizon = $tle->get ('geometric') ? 0 : $horizon;
+    my $pass_threshold = $tle->get( 'pass_threshold' );
     my $twilight = $tle->get ('twilight');
     my $want_visible = $tle->get ('visible');
     my $appulse_dist = $tle->get ('appulse');
@@ -1459,6 +1468,19 @@ eod
 		    station => $sta,
 		    time => $time,
 		    @extra,
+		};
+	    }
+
+	    # Now that we have the positions of the main events, we can
+	    # apply the pass_threshold if that was defined.
+
+	    if ( defined $pass_threshold ) {
+		my ( $event ) = grep { $_->{event} == PASS_EVENT_MAX }
+		@info;
+		$event->{elevation} < $pass_threshold
+		    and do {
+		    @info = ();
+		    next;
 		};
 	    }
 
@@ -1843,7 +1865,7 @@ It does not under any circumstances manufacture another object.
 
 sub rebless {
     my ($tle, @args) = @_;
-    _instance( $tle, __PACKAGE__ ) or croak <<eod;
+    __instance( $tle, __PACKAGE__ ) or croak <<eod;
 Error - You can only rebless an object of class @{[__PACKAGE__]}
         or a subclass thereof. The object you are trying to rebless
 	is of class @{[ref $tle]}.
@@ -1858,7 +1880,7 @@ eod
 	or return $tle;
     $class = $type_map{$class} if $type_map{$class};
     load_module ($class);
-    _classisa( $class, __PACKAGE__ ) or croak <<eod;
+    __classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - You can only rebless an object into @{[__PACKAGE__]} or
         a subclass thereof. You are trying to rebless the object
 	into $class.
@@ -2021,7 +2043,7 @@ eod
 Error - The status (add => $id) call requires a type.
 eod
 	my $class = $type_map{$type} || $type;
-	_classisa( $class, __PACKAGE__ ) or croak <<eod;
+	__classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - $type must specify a subclass of @{[__PACKAGE__]}.
 eod
 	my $status = shift || 0;
@@ -2044,7 +2066,7 @@ eod
 	    %status = ();
 	} else {
 	    my $class = $type_map{$type} || $type;
-	    _classisa( $class, __PACKAGE__ ) or croak <<eod;
+	    __classisa( $class, __PACKAGE__ ) or croak <<eod;
 Error - $type must specify a subclass of @{[__PACKAGE__]}.
 eod
 	    foreach my $key (keys %status) {
@@ -2064,12 +2086,9 @@ eod
 	    map {[$_->{id}, $_->{type}, $_->{status}, $_->{name},
 	    $_->{comment}]} values %status);
     } elsif ($cmd eq 'yaml') {	# <<<< Undocumented!!!
-	my $class = eval {require YAML::Syck; 'YAML::Syck'} ||
-	eval {require YAML; 'YAML'}
-	    or croak "Neither YAML nor YAML::Syck available";
-	my $dumper = $class->can('Dump')
-	    or croak "$class does not implement Dump()";
-	print $dumper->(\%status);
+	load_module( 'YAML::Any' )
+	    or croak 'YAML::Any not available';
+	print YAML::Any::Dump( \%status );
     } else {
 	croak <<eod;
 Error - '$cmd' is not a legal status() command.
@@ -7998,6 +8017,17 @@ launch, at the epoch.
 This attribute contains the second time derivative of the mean
 motion, in radians per minute cubed.
 
+=item pass_threshold (numeric or undef)
+
+If defined, this attribute defines the elevation in radians that the
+satellite must reach above the horizon for its passes to be reported.
+If undefined, any pass above the horizon will be reported. You might use
+this if you want to use a nominal horizon of .35 radians (20 degrees),
+but are only interested in passes that reach an elevation of .70 radians
+(40 degrees).
+
+The default is C<undef>.
+
 =item tle (string, readonly, parse)
 
 This attribute contains the input data used by the parse() method to
@@ -8058,7 +8088,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

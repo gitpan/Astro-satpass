@@ -101,7 +101,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -2393,7 +2393,7 @@ There. This took many more words to explain than it did to implement.
 sub represents {
     return defined ($_[1]) ?
 ##	$_[0]->represents()->isa($_[1]) :
-	_classisa($_[0]->represents(), $_[1]) ? 1 : 0 :
+	__classisa($_[0]->represents(), $_[1]) ? 1 : 0 :
 	(ref $_[0] || $_[0]);
 }
 
@@ -3325,7 +3325,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

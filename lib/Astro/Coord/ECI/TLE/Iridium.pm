@@ -121,7 +121,7 @@ use warnings;
 
 use base qw{Astro::Coord::ECI::TLE};
 
-our $VERSION = '0.045';
+our $VERSION = '0.046';
 
 use Astro::Coord::ECI::Sun;
 use Astro::Coord::ECI::Utils qw{:all};
@@ -492,7 +492,7 @@ sub _flare_fixed {
     my $station = shift;
     {
 	local $@;
-	_instance( $station, 'Astro::Coord::ECI' ) or croak <<eod;
+	__instance( $station, 'Astro::Coord::ECI' ) or croak <<eod;
 Error - The station must be a subclass of Astro::Coord::ECI.
 eod
     }
@@ -1657,7 +1657,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2011 by Thomas R. Wyant, III
+Copyright (C) 2005-2012 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text
