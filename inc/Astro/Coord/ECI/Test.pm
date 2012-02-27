@@ -5,18 +5,31 @@ use 5.006002;
 use strict;
 use warnings;
 
-use Carp;
-
-our $VERSION = '0.047';
+our $VERSION = '0.047_01';
 
 use base qw{ Exporter };
 
 use Astro::Coord::ECI::TLE qw{ :constants };
 use Astro::Coord::ECI::Utils qw{ rad2deg };
+use Test::More 0.88;
 
-our @EXPORT_OK = qw{ format_pass format_time };
-our %EXPORT_TAGS = ( all => \@EXPORT_OK );
+our @EXPORT_OK = qw{
+    format_pass format_time
+    tolerance tolerance_frac
+    velocity_sanity
+};
+our %EXPORT_TAGS = (
+    all => \@EXPORT_OK,
+    format => [ qw{ format_pass format_time } ],
+    tolerance => [ qw{ tolerance tolerance_frac } ],
+);
 
+sub _dor {
+    foreach ( @_ ) {
+	defined $_ and return $_;
+    }
+    return;
+}
 
 {
 
@@ -94,6 +107,101 @@ sub format_time {
 	$parts[4] + 1, @parts[ 3, 2, 1, 0 ];
 }
 
+sub tolerance (@) {
+    my ( $got, $want, $tolerance, $title, $fmtr ) = @_;
+    $fmtr ||= sub { return $_[0] };
+    $title =~ s{ (?<! [.] ) \z }{.}smx;
+    my $delta = $got - $want;
+    my $rslt = abs( $delta ) < $tolerance;
+    $rslt or $title .= <<"EOD";
+
+         Got: @{[ $fmtr->( $got ) ]}
+    Expected: @{[ $fmtr->( $want ) ]}
+  Difference: $delta
+   Tolerance: $tolerance
+EOD
+    chomp $title;
+    @_ = ( $rslt, $title );
+    goto &ok;
+}
+
+sub tolerance_frac (@) {
+    my ( $got, $want, $tolerance, $title, $fmtr ) = @_;
+    @_ = ( $got, $want, $tolerance * abs $want, $title, $fmtr );
+    goto &tolerance;
+}
+
+{
+    my @dim_name = qw{ X Y Z };
+    my %method_dim_name = (
+	azel	=> [ qw{ azimuth elevation range } ],
+	equatorial => [ 'right ascension', 'declination', 'range' ],
+    );
+    my %tweak = (
+	azel => sub {
+	    my ( $delta, $current, $previous ) = @_;
+	    $delta->[0] *= cos( ( $current->[1] + $previous->[1] ) / 2 );
+	    return;
+	},
+	equatorial => sub {
+	    my ( $delta, $current, $previous ) = @_;
+	    $delta->[1] *= cos( ( $current->[0] + $previous->[0] ) / 2 );
+	    return;
+	},
+    );
+
+    sub velocity_sanity ($$;$) {
+	my ( $method, $body, $sta ) = @_;
+	my $time = $body->universal();
+	my @rslt;
+	foreach my $delta_t ( 0, 1 ) {
+	    $delta_t
+		and $body->universal( $time + $delta_t );
+	    my @coord = $sta ? $sta->$method( $body ) :
+		$body->$method();
+	    # Accommodate internal methods that return a reference to an
+	    # array of intermediate results.
+	    ref @coord and shift @coord;
+	    push @rslt, \@coord;
+	}
+	my @delta_p = map { $rslt[1][$_] - $rslt[0][$_] } ( 0 .. 2 );
+	$tweak{$method}
+	    and $tweak{$method}->( \@delta_p, @rslt );
+	my @time_a = gmtime $time;
+	my $title = sprintf
+	    '%s converted to %s at %i/%i/%i %i:%02i:%02i GMT',
+	    $body->get( 'name' ) || $body->get( 'id' ), $method,
+	    $time_a[5] + 1900, $time_a[4] + 1, @time_a[ 3, 2, 1, 0 ];
+	my $grade = \&pass;
+	foreach my $inx ( 0 .. 2 ) {
+	    my $v_inx = $inx + 3;
+	    defined $rslt[0][$v_inx]
+		and defined $rslt[1][$v_inx]
+		and $rslt[0][$v_inx] <= $delta_p[$inx]
+		and $delta_p[$inx] <= $rslt[1][$v_inx]
+		and next;
+	    defined $rslt[0][$v_inx]
+		and defined $rslt[1][$v_inx]
+		and $rslt[0][$v_inx] >= $delta_p[$inx]
+		and $delta_p[$inx] >= $rslt[1][$v_inx]
+		and next;
+	    my $dim = $method_dim_name{$method}[$inx] || $dim_name[$inx];
+	    $grade = \&fail;
+	    $title .= <<"EOD";
+
+
+           $dim( t + 1 ): $rslt[1][$inx]
+               $dim( t ): $rslt[0][$inx]
+          $dim dot ( t ): @{[ _dor( $rslt[0][$v_inx], '<undef>' ) ]}
+  $dim( t + 1 ) - $dim( t ): $delta_p[$inx]
+      $dim dot ( t + 1 ): @{[ _dor( $rslt[1][$v_inx], '<undef>' ) ]}
+EOD
+	    chomp $title;
+	}
+	@_ = ( $title );
+	goto &$grade;
+    }
+}
 
 1;
 
@@ -143,6 +251,35 @@ are also provided, on a line after the event.
 
 This subroutine converts a given Perl time into an ISO-8601-ish GMT
 time. It is used by C<format_pass()>.
+
+=head2 tolerance
+
+ tolerance $got, $want, $tolerance, $title, $formatter
+
+This subroutine runs a test, to see if the absolute value of
+C<$got - $want> is less than C<$tolerance>. If so, the test passes. If
+not, it fails. This subroutine computes the passage or failure, but does
+a C<< goto &Test::More::ok >> to generate the appropriate TAP output.
+However, if the test is going to fail, the title is modified to include
+the C<$got> and C<$want> values, their difference, and the tolerance.
+
+The C<$formatter> argument is optional. If specified, it is a reference
+to code used to format the C<$got> and C<$want> values for display if
+the test fails. The formatter will be called with a single argument,
+which is the value to display.
+
+This subroutine is prototyped C<(@)>.
+
+=head2 tolerance_frac
+
+ tolerance_frac $got, $want, $tolerance, $title
+
+This subroutine is a variant on C<tolerance()> in which the tolerance is
+expressed as a fraction of the C<$want> value. It is actually just a
+stub that replaces the C<$tolerance> argument by
+C<< abs( $want * $tolerance ) >> and then does a C<goto &tolerance>.
+
+This subroutine is prototyped C<(@)>.
 
 =head1 SUPPORT
 

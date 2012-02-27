@@ -209,14 +209,14 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.047';
+our $VERSION = '0.047_01';
 
 use base qw{Astro::Coord::ECI Exporter};
 
 use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
     embodies find_first_true load_module looks_like_number
     max mod2pi PI PIOVER2 rad2deg
-    SECSPERDAY TWOPI thetag };
+    SECSPERDAY TWOPI thetag __default_station };
 
 use Carp qw{carp croak confess};
 use Data::Dumper;
@@ -1063,8 +1063,9 @@ This method returns passes of the body over the given station between
 the given start end end times. The \@sky argument is background bodies
 to compute appulses with.
 
-All arguments except $station are optional, the defaults being
+All arguments are optional, the defaults being
 
+ $station = the 'station' attribute
  $start = time()
  $end = $start + 7 days
  \@sky = []
@@ -1215,7 +1216,7 @@ use constant SCREENING_HORIZON_OFFSET => deg2rad( -3 );
 *_nodelegate_pass = \&pass;
 
 sub pass {
-    my @args = @_;
+    my @args = __default_station( @_ );
     my @sky;
     ref $args[-1] eq 'ARRAY' and @sky = @{pop @args};
     my $tle = shift @args;
@@ -8085,9 +8086,9 @@ was his discussion of the coordinate system used
 (L<http://celestrak.com/columns/v02n01/>) and (indirectly) his Pascal
 implementation of these models.
 
-The file F<t/sgp4-ver.tle>, used in testing the C<sgp4r> model, is from
-"Revisiting Spacetrack Report #3" (made available at the CelesTrak web
-site as cited above), and is used with the kind permission of Dr. Kelso.
+The TLE data used in testing the C<sgp4r> model are from "Revisiting
+Spacetrack Report #3" (made available at the CelesTrak web site as cited
+above), and are used with the kind permission of Dr. Kelso.
 
 =head1 SEE ALSO
 
