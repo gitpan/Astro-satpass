@@ -121,7 +121,7 @@ use warnings;
 
 use base qw{Astro::Coord::ECI::TLE};
 
-our $VERSION = '0.047_02';
+our $VERSION = '0.047_03';
 
 use Astro::Coord::ECI::Sun;
 use Astro::Coord::ECI::Utils qw{:all};
@@ -584,7 +584,7 @@ eod
 
 #	Calculate whether satellite is above horizon.
 
-	my (undef, $elev, $rng) = $station->azel ($self, 0);
+	my ( undef, $elev, $rng ) = $station->azel_offset( $self, 0 );
 	$elev > $horizon or next;
 
 
@@ -1273,8 +1273,8 @@ my $sub_vector = do {
 	vector_dot_product ($q_p, $n);
     [$q_p->[0] * $k + $p->[0], $q_p->[1] * $k + $p->[1], $q_p->[2] * $k + $p->[2]];
     };
-my $sub_point = Astro::Coord::ECI->universal ($time)->
-    eci (@$sub_vector);
+my $sub_point = Astro::Coord::ECI->new(
+    station => $station )->universal( $time )->eci( @$sub_vector );
 
 
 #	Stash the data.
