@@ -140,7 +140,7 @@ our @CARP_NOT = qw{
     Astro::Coord::ECI
 };
 
-our $VERSION = '0.048';
+our $VERSION = '0.049';
 
 use constant ERR_NOCURRENT => <<eod;
 Error - Can not call %s because there is no current member. Be
@@ -318,6 +318,36 @@ sub clear {
     $self->{current} = undef;
     @{$self->{members}} = ();
     return $self;
+}
+
+=item $value = $set->get( $name );
+
+This method returns the value of the named attribute.
+
+If the attribute name is C<'tle'>, it returns the concatenated TLE data
+of all TLEs in the set. Otherwise it simply returns the named attribute
+of the selected C<Astro::Coord::ECI::TLE> object.
+
+=cut
+
+{
+    my %override = (
+	tle	=> sub {
+	    my ( $self, $name ) = @_;
+	    my $output;
+	    foreach my $body ( $self->members() ) {
+		$output .= $body->get( 'tle' );
+	    }
+	    return $output;
+	},
+    );
+
+    sub get {
+	my ( $self, $name ) = @_;
+	$override{$name}
+	    and return $override{$name}->( $self, $name );
+	return $self->select()->get( $name );
+    }
 }
 
 =item $time = $set->max_effective_date(...);

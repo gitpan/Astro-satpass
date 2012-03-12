@@ -121,7 +121,7 @@ use warnings;
 
 use base qw{Astro::Coord::ECI::TLE};
 
-our $VERSION = '0.048';
+our $VERSION = '0.049';
 
 use Astro::Coord::ECI::Sun;
 use Astro::Coord::ECI::Utils qw{:all};
@@ -1433,7 +1433,7 @@ sub _reflection_fixed {
 #	Calculate whether satellite is above horizon.
 
     my (undef, $elev) = $station->universal ($time)->
-	    azel ($self->universal ($time), 0);
+	    azel_offset( $self->universal ($time), 0 );
     return scalar _make_status (
 	sprintf ('Satellite %.2f degrees below horizon', rad2deg (-$elev)))
 	unless $elev >= 0;

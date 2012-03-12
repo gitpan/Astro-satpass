@@ -131,7 +131,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.048';
+our $VERSION = '0.049';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -2337,6 +2337,7 @@ sub precess_dynamical {
     if ( my $sta = $self->get( 'station' ) ) {
 	$sta->get( 'station' )
 	    and croak NO_CASCADING_STATIONS;
+	$sta->universal( $self->universal() );
 	$sta->precess_dynamical( $end );
     }
 
