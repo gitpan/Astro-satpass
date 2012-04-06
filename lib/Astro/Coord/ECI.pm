@@ -131,7 +131,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.049_01';
+our $VERSION = '0.049_02';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -887,6 +887,21 @@ sub ecliptic {
 	};
 
     }
+}
+
+
+=item $longitude = $coord->ecliptic_longitude();
+
+This method returns the ecliptic longitude of the body at its current
+time setting, in radians. It is really just a convenience method, since
+it is equivalent to C<< ( $coord->ecliptic() )[1] >>, and in fact that
+is how it is implemented.
+
+=cut
+
+sub ecliptic_longitude {
+    my ( $self ) = @_;
+    return ( $self->ecliptic() )[1];
 }
 
 

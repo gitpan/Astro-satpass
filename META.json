@@ -4,7 +4,7 @@
       "Tom Wyant (wyant at cpan dot org)"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.4, CPAN::Meta::Converter version 2.120630",
+   "generated_by" : "Module::Build version 0.4, CPAN::Meta::Converter version 2.120900",
    "license" : [
       "perl_5"
    ],
@@ -45,35 +45,39 @@
    "provides" : {
       "Astro::Coord::ECI" : {
          "file" : "lib/Astro/Coord/ECI.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
+      },
+      "Astro::Coord::ECI::Mixin" : {
+         "file" : "lib/Astro/Coord/ECI/Mixin.pm",
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::Moon" : {
          "file" : "lib/Astro/Coord/ECI/Moon.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::Star" : {
          "file" : "lib/Astro/Coord/ECI/Star.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::Sun" : {
          "file" : "lib/Astro/Coord/ECI/Sun.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::TLE" : {
          "file" : "lib/Astro/Coord/ECI/TLE.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::TLE::Iridium" : {
          "file" : "lib/Astro/Coord/ECI/TLE/Iridium.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::TLE::Set" : {
          "file" : "lib/Astro/Coord/ECI/TLE/Set.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       },
       "Astro::Coord::ECI::Utils" : {
          "file" : "lib/Astro/Coord/ECI/Utils.pm",
-         "version" : "0.049_01"
+         "version" : "0.049_02"
       }
    },
    "release_status" : "testing",
@@ -85,5 +89,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "0.049_01"
+   "version" : "0.049_02"
 }
