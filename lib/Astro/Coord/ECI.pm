@@ -131,7 +131,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.049_02';
+our $VERSION = '0.049_03';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -1662,6 +1662,7 @@ sub heliocentric_ecliptic_cartesian {
 	    },
 	};
 	$self->{specified} = 'heliocentric_ecliptic_cartesian';
+	$self->{inertial} = 1;
 	$self->_convert_heliocentric_ecliptic_cartesian_to_eci();
     } elsif ( @args ) {
 	croak 'heliocentric_ecliptic_cartesian() wants 0, 1, 3 or 4 arguments';
