@@ -144,7 +144,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.051';
+our $VERSION = '0.051_01';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -162,6 +162,8 @@ my %known_ellipsoid;	# Known reference ellipsoids. We define these
 		# just before the reference_ellipsoid() method for
 		# convenience.
 my %static = (	# The geoid, etc. Geoid gets set later.
+#   almanac_horizon	=> set when instantiated, so that the following
+#   _almanac_horizon	=>     gets set automatically by the mutator.
     angularvelocity => 7.292114992e-5,	# Of surface of Earth, 1998. Meeus, p.83
     debug => 0,
     diameter => 0,
@@ -183,11 +185,12 @@ to the set() method once the object has been instantiated.
 =cut
 
 sub new {
-    my ($class, @args) = @_;
-    ref $class and $class = ref $class;
-    my $self = bless {%static}, $class;
+    my ( $class, @args ) = @_;
+    my $self = bless { %static }, ref $class || $class;
     $self->{inertial} = $self->_initial_inertial();
-    @args and $self->set (@args);
+    @args and $self->set( @args );
+    exists $self->{almanac_horizon}
+	or $self->set( almanac_horizon => 0 );
     $self->{debug} and do {
 	local $Data::Dumper::Terse = 1;
 	print "Debug - Instantiated ", Dumper ($self);
@@ -402,7 +405,6 @@ version the orbiting body is the invocant.
 
 sub azel_offset {
     my ( $self, $trn2, $offset ) = _expand_args_default_station( @_ );
-    my $cache = ($self->{_ECI_cache} ||= {});
     $self->{debug} and do {
 	local $Data::Dumper::Terse = 1;
 	print "Debug azel_offset - ", Dumper ($self, $trn2, $offset);
@@ -1027,7 +1029,7 @@ sub equatorial {
 	    and croak 'You may not set the equatorial coordinates ',
 	'relative to an observer';
 
-	my ($ra, $dec, $range, @eqvel) = @args;
+##	my ($ra, $dec, $range, @eqvel) = @args;
 	$args[0] = _check_right_ascension( 'right ascension' => $args[0] );
 	$args[1] = _check_latitude( declination => $args[1] );
 	$self->{_ECI_cache}{inertial}{equatorial} = \@args;
@@ -1747,7 +1749,6 @@ sub heliocentric_ecliptic {
 
 sub _local_cartesian {
     my ( $self, $trn2 ) = @_;
-    my $cache = ( $self->{_ECI_cache} ||= {} );
     $self->{debug} and do {
 	local $Data::Dumper::Terse = 1;
 	print "Debug local_cartesian - ", Dumper( $self, $trn2 );
@@ -2645,6 +2646,7 @@ eod
 #	bitwise 'or' of the desired action masks, defined above.
 
 %mutator = (
+    almanac_horizon	=> \&_set_almanac_horizon,
     angularvelocity => \&_set_value,
     debug => \&_set_value,
     diameter => \&_set_value,
@@ -2666,6 +2668,37 @@ eod
     sun	=> \&_set_sun,
     twilight => \&_set_value,
 );
+
+{
+    # TODO this will all be nicer if I had state variables.
+
+    my %special = (
+	horizon	=> sub { return $_[0]->get( 'horizon' ); },
+	height	=> sub { return $_[0]->dip(); },
+    );
+
+    sub _set_almanac_horizon {
+	my ( $hash, $attr, $value ) = @_;
+	defined $value
+	    or $value = 0;	# Default
+	if ( $special{$value} ) {
+	    $hash->{"_$attr"} = $special{$value};
+	} elsif ( looks_like_number( $value ) ) {
+	    $hash->{"_$attr"} = sub { return $_[0]->get( $attr ) };
+	} else {
+	    croak "'$value' is an invalid value for '$attr'";
+	}
+	$hash->{$attr} = $value;
+	return SET_ACTION_NONE;
+    }
+}
+
+#	Get the actual value of the almanac horizon, from whatever
+#	source.
+
+sub __get_almanac_horizon {
+    goto $_[0]{_almanac_horizon};
+}
 
 #	If you set semimajor or flattening, the ellipsoid name becomes
 #	undefined. Also clear any cached geodetic coordinates.
@@ -2697,7 +2730,7 @@ sub _set_sun {
 	or croak 'The value of the sun attribute must represent the Sun';
     ref $value
 	or $value = $value->new();
-    return $value;
+    return SET_ACTION_NONE;
 }
 
 #	Unfortunately, the TLE subclass may need objects reblessed if
@@ -3394,6 +3427,24 @@ This class has the following attributes:
 
 =over
 
+=item almanac_horizon (radians or string)
+
+This attribute specifies the horizon used for almanac calculations, as
+radians above or below the plans of the observer.  It can also be set to
+the following strings:
+
+* C<height> adjusts the horizon in proportion to the observer's height
+above sea level. This assumes a spherical Earth and an unobstructed
+horizon.
+
+* C<horizon> causes the value of the C<horizon> attribute to be used for
+almanac calculations also. Changes in C<horizon> will be tracked.
+
+When doing almanac calculations, it is the C<almanac_horizon> of the
+observer that is used.
+
+The default is C<0>.
+
 =item angularvelocity (radians per second)
 
 This attribute represents the angular velocity of the Earth's surface in
@@ -3564,10 +3615,7 @@ in all cases if it becomes a problem.
 =item twilight (numeric, radians)
 
 This attribute represents the elevation of the center of the Sun's disk
-at the beginning and end of twilight. It should probably be an
-attribute of the Sun subclass, since it is only used by the almanac ()
-method of that subclass, but it's here so you can blindly set it when
-computing almanac data.
+at the beginning and end of twilight.
 
 Some of the usual values are:
 
@@ -3575,15 +3623,11 @@ Some of the usual values are:
  nautical twilight: -12 degrees
  astronomical twilight: -18 degrees
 
-For example, to set nautical twilight you could do
-
- $eci->set( twilight => 'nautical' );
-
-or, equivalently,
-
- $eci->set( twilight => deg2rad( -12 ) );
-
-where C<deg2rad()> is imported from Astro::Coord::ECI::Utils.
+B<Note> that the documentation at this point used to say (or at least
+imply) that the strings C<'civil'>, C<'nautical'>, and C<'astronomical'>
+were acceptable. This has never been the case to my knowledge, so since
+I have received no bug reports, I have considered the bug to be in the
+documentation, and removed the relevant text as of version 0.051_01.
 
 The default is -6 degrees (or, actually, the equivalent in radians).
 

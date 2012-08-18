@@ -10,8 +10,7 @@ sub recommend {
     my @recommend;
     my $pkg_hash = __PACKAGE__ . '::';
     no strict qw{ refs };
-    foreach my $subroutine (
-	sort keys %$pkg_hash ) {
+    foreach my $subroutine ( sort keys %$pkg_hash ) {
 	$subroutine =~ m/ \A _recommend_ \w+ \z /smx or next;
 	my $code = __PACKAGE__->can( $subroutine ) or next;
 	defined( my $recommendation = $code->() ) or next;
@@ -75,6 +74,21 @@ EOD
     return $recommendation;
 }
 
+sub _recommend_datetime {
+    local $@ = undef;
+    eval { require DateTime; require DateTime::TimeZone; 1; }
+	and return;
+    return <<'EOD';
+    * DateTime and/or DateTime::TimeZone are not installed.
+      If you set the 'zone' attribute of Astro::Coord::ECI::TLE::Iridium
+      to a zone name, these modules will be used to determine if a flare
+      occurred before or after midnight. If not available, $ENV{TZ} will
+      be set to the zone name in the hope that the localtime() built-in
+      will respond to this. If the 'zone' attribute is undef (the
+      default) or a numeric offset from GMT, this module is not used.
+EOD
+}
+
 sub _recommend_geo_coder_geocoder_us {
     local $@ = undef;
     eval { require Geo::Coder::Geocoder::US; 1 } and return;
@@ -115,6 +129,17 @@ sub _recommend_io_string {
       IO::String is required by the 'satpass' script if you wish to pass
       commands on the command line, or to define macros. If you do not
       intend to do these things, IO::String is not needed.
+EOD
+}
+
+sub _recommend_json {
+    local $@ = undef;
+    eval { require JSON; 1 } and return;
+    return <<'EOD';
+    * JSON is not installed, or can not be loaded.
+      You need the JSON module only if you intend to pass JSON orbital
+      data obtained from Space Track to the Astro::Coord::ECI::TLE
+      parse() method.
 EOD
 }
 
