@@ -84,7 +84,7 @@ is_deeply $hash, {
     'EPOCH' => '2000-06-27 18:50:19',
     'EPOCH_MICROSECONDS'	=> '733568',
     'INCLINATION' => '34.2682',
-    'INTLDES' => '1958-002B',
+    'INTLDES' => '58002B',
     'LAUNCH_NUM' => '002',
     'LAUNCH_PIECE' => 'B',
     'LAUNCH_YEAR' => 1958,
@@ -170,7 +170,7 @@ is_deeply $hash, {
     'EPOCH' => '2000-06-27 18:50:19',
     'EPOCH_MICROSECONDS' => '733568',
     'INCLINATION' => '34.2682',
-    'INTLDES' => '1958-002B',
+    'INTLDES' => '58002B',
     'LAUNCH_NUM' => '002',
     'LAUNCH_PIECE' => 'B',
     'LAUNCH_YEAR' => 1958,
@@ -219,8 +219,10 @@ sub _fudge_json {
 
     # MSWin32 (at least!) insists on a three-digit exponent, so we fudge
     # it back to two.
-    $hash->{MEAN_MOTION_DOT} =~ s{ (?<= e [+-] ) ( \d+ ) \z }
-	{ sprintf '%02d', $1 }smxe;
+    foreach my $key ( qw{ BSTAR MEAN_MOTION_DOT MEAN_MOTION_DDOT } ) {
+	$hash->{$key} =~ s{ (?<= e [+-] ) ( \d+ ) \z }
+	    { sprintf '%02d', $1 }smxe;
+    }
 
     return;
 }
