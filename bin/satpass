@@ -22,7 +22,6 @@ use FileHandle;
 use Getopt::Long;
 use Pod::Usage;
 use POSIX qw{floor strftime};
-use Term::ReadLine;
 use Text::Abbrev;
 use Text::ParseWords;
 
@@ -38,7 +37,7 @@ $clipboard_unavailable = $IO::Clipboard::clipboard_unavailable;
 #	Initialization
 #
 
-our $VERSION = '0.052';
+our $VERSION = '0.053';
 
 use constant LINFMT => <<eod;
 %s %s %8.4f %9.4f %7.1f %-4s %s
@@ -195,8 +194,22 @@ my $inifil = $ENV{SATPASSINI} ? $ENV{SATPASSINI} :
 sub _format_location;	# Predeclare, so I do not need explicit STDOUT.
 sub _time ();		# Predeclare, since I intend to redefine.
 
-my $rl;
-$rl = Term::ReadLine->new ('Predict satellite passes') if -t STDIN;
+my $reader = eval {
+    -t STDIN
+	or return;
+    require Term::ReadLine;
+    my $rl = Term::ReadLine->new( 'Predict satellite passes' )
+	or return;
+    return sub {
+	my ( $fh, @arg ) = @_;
+	return -t $fh ?  $rl->readline( @arg ) : $fh->getline();
+    };
+} || sub {
+    my ( $fh, @arg ) = @_;
+    -t $fh and print "\n@arg";
+    return $fh->getline();
+};
+
 my $fh = *STDIN;
 my @frame;
 my %alias = (
@@ -329,10 +342,7 @@ while (1) {
 
     my $cntind = $frame[$#frame]{cntind} || '';
     my $buffer = @frame > 1 ? $fh->getline () :
-	-t $fh ?
-	    $rl ? $rl->readline ("$cntind$parm{prompt} ") :
-		do {print "\n$cntind$parm{prompt} "; $fh->getline ()} :
-	    $fh->getline ();
+	$reader->( $fh, "$cntind$parm{prompt} " );
 
 #	If it was end-of-file, pop one level off the stack of input
 #	files. If it's empty, we exit the execution loop. Otherwise
@@ -2256,8 +2266,11 @@ $fh = $hdl;
 #	In addition to the usual command qualifiers, st takes -verbose,
 #	which means to display all data fetched.
 
+my %st_suppress_output;
+
 BEGIN {
-$cmdlgl{st} = [qw{end=s start=s verbose}];
+    $cmdlgl{st} = [qw{end=s start=s verbose}];
+    %st_suppress_output = map { $_ => 1 } '', 'set';
 }
 
 sub st {
@@ -2313,7 +2326,7 @@ if (!$rslt->is_success) {
     __PACKAGE__->_iridium_status (@rest);
     $cmdopt{verbose} and print $rslt->content, "\n";
     }
-  elsif ($content || $cmdopt{verbose}) {
+  elsif ( ! $st_suppress_output{$content} || $cmdopt{verbose}) {
     print $rslt->content, "\n";
     }
 }
