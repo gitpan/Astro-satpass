@@ -102,6 +102,17 @@ L<Astro::Coord::ECI|Astro::Coord::ECI> C<edge_of_earths_shadow>
 attribute, and you will get a warning on C<every> use. On the first
 release after March 1 2013, you will get a fatal error on use.
 
+Use of the L<SATNAME> JSON attribute to represent the common name of the
+satellite is deprecated in favor of the L<OBJECT_NAME> attribute, since
+the latter is what Space Track uses in their TLE data. Beginning with
+0.053_01, JSON output of TLEs will use the new name.
+
+Beginning with the first release after April 1 2013, loading JSON TLE
+data which specifies L<SATNAME> will produce a warning the first time it
+happens. Six months after that, there will be a warning every time it
+happens. A further six months later, loading JSON TLE data which
+specifies L<SATNAME> will become a fatal error.
+
 =head1 DESCRIPTION
 
 This module implements the orbital propagation models described in
@@ -207,7 +218,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.053';
+our $VERSION = '0.053_01';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -6836,13 +6847,14 @@ encoded with a four-digit year.
 	    ) * SGP_XMNPDA * SGP_XMNPDA * SGP_XMNPDA / TWOPI;
 	},
 	NORAD_CAT_ID	=> 'id',
+	OBJECT_NAME	=> 'name',
 	RA_OF_ASC_NODE	=> sub {
 	    my ( $self ) = @_;
 	    return rad2deg( $self->get( 'ascendingnode' ) );
 	},
 	RCSVALUE	=> 'rcs',
 	REV_AT_EPOCH	=> 'revolutionsatepoch',
-	SATNAME		=> 'name',
+	TLE_LINE0	=> 'name',
 	effective_date	=> sub {
 	    my ( $self ) = @_;
 	    return _format_json_time( $self->get( 'effective' ) );
@@ -6931,7 +6943,7 @@ encoded with a four-digit year.
     my %json_map = (
 	INTLDES		=> 'international',
 	NORAD_CAT_ID	=> 'id',
-	SATNAME		=> 'name',
+	OBJECT_NAME	=> 'name',
 	RCSVALUE	=> 'rcs',
 #	LAUNCH_YEAR	=> 'launch_year',
 #	LAUNCH_NUM	=> 'launch_num',
@@ -7001,6 +7013,12 @@ encoded with a four-digit year.
 BODY_LOOP:
 	    foreach my $hash ( 'ARRAY' eq ref $decode ? @{ $decode } :
 		$decode ) {
+
+		if ( exists $hash->{SATNAME} ) {	# TODO Deprecated
+		    exists $hash->{OBJECT_NAME}
+			or $hash->{OBJECT_NAME} = $hash->{SATNAME};
+		    delete $hash->{SATNAME};
+		}
 
 		foreach my $key ( @required ) {
 		    defined $hash->{$key} and next;
