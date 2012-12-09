@@ -45,39 +45,39 @@
    "provides" : {
       "Astro::Coord::ECI" : {
          "file" : "lib/Astro/Coord/ECI.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::Mixin" : {
          "file" : "lib/Astro/Coord/ECI/Mixin.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::Moon" : {
          "file" : "lib/Astro/Coord/ECI/Moon.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::Star" : {
          "file" : "lib/Astro/Coord/ECI/Star.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::Sun" : {
          "file" : "lib/Astro/Coord/ECI/Sun.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::TLE" : {
          "file" : "lib/Astro/Coord/ECI/TLE.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::TLE::Iridium" : {
          "file" : "lib/Astro/Coord/ECI/TLE/Iridium.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::TLE::Set" : {
          "file" : "lib/Astro/Coord/ECI/TLE/Set.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       },
       "Astro::Coord::ECI::Utils" : {
          "file" : "lib/Astro/Coord/ECI/Utils.pm",
-         "version" : "0.055"
+         "version" : "0.056"
       }
    },
    "release_status" : "stable",
@@ -89,5 +89,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "0.055"
+   "version" : "0.056"
 }
