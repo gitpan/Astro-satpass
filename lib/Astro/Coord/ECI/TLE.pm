@@ -97,21 +97,21 @@ actually be visible above the threshold to be reported. This is actually
 how the attribute would have worked when introduced if I had thought it
 through clearly.
 
-The C<limb> attribute is deprecated in favor of the
+The C<limb> attribute has been removed as of version 0.056_01.
+Attempts to use it will result in a fatal error. Use the
 L<Astro::Coord::ECI|Astro::Coord::ECI> C<edge_of_earths_shadow>
-attribute, and you will get a warning on C<every> use. On the first
-release after March 1 2013, you will get a fatal error on use.
+attribute instead.
 
 Use of the L<SATNAME> JSON attribute to represent the common name of the
 satellite is deprecated in favor of the L<OBJECT_NAME> attribute, since
 the latter is what Space Track uses in their TLE data. Beginning with
 0.053_01, JSON output of TLEs will use the new name.
 
-Beginning with the first release after April 1 2013, loading JSON TLE
-data which specifies L<SATNAME> will produce a warning the first time it
-happens. Six months after that, there will be a warning every time it
-happens. A further six months later, loading JSON TLE data which
-specifies L<SATNAME> will become a fatal error.
+Beginning with release 0.056_01, loading JSON TLE data which specifies
+L<SATNAME> will produce a warning the first time it happens. Six months
+after that, there will be a warning every time it happens. A further six
+months later, loading JSON TLE data which specifies L<SATNAME> will
+become a fatal error.
 
 =head1 DESCRIPTION
 
@@ -218,7 +218,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.056';
+our $VERSION = '0.056_01';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -329,10 +329,8 @@ use constant SGP_RHO => .15696615;
 # attribute.
 {
     sub __limb_deprecation {
-	warnings::enabled( 'deprecated' )
-	    and carp q{The 'limb' attribute is deprecated; use the },
+	croak q{The 'limb' attribute has been removed; use the },
 		q{'edge_of_earths_shadow' attribute instead};
-	return;
     }
 }
 
@@ -7012,6 +7010,8 @@ encoded with a four-digit year.
 	return $rslt;
     }
 
+    my $satname_deprecated;
+
     sub _parse_json {
 	my ( $self, @args ) = @_;
 	defined $have_json
@@ -7032,6 +7032,10 @@ BODY_LOOP:
 		$decode ) {
 
 		if ( exists $hash->{SATNAME} ) {	# TODO Deprecated
+		    not $satname_deprecated++
+			and warnings::enabled( 'deprecated' )
+			and carp 'The SATNAME JSON key is deprecated ',
+			    'in favor of the OBJECT_NAME key';
 		    exists $hash->{OBJECT_NAME}
 			or $hash->{OBJECT_NAME} = $hash->{SATNAME};
 		    delete $hash->{SATNAME};
@@ -8387,13 +8391,9 @@ This attribute tells the pass() method how to compute illumination
 of the body. If true, it is computed based on the upper limb of the
 source of illumination; if false, it is based on the center.
 
-This attribute is B<deprecated>, in favor of the superclass'
-C<edge_of_earths_shadow> attribute, which it is implemented in terms of.
-The mutator sets C<edge_of_earths_shadow> to C<1> for a true value or
-C<0> for a false value.  The accessor returns true for B<any> non-zero
-value of C<edge_of_earths_shadow>.
-
-The default is 1 (i.e. true).
+This attribute has been removed as of version 0.056_01 in
+favor of the superclass' C<edge_of_earths_shadow> attribute. Any attempt
+to use it will result in a fatal error.
 
 =item meananomaly (numeric, parse)
 
@@ -8581,7 +8581,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2012 by Thomas R. Wyant, III
+Copyright (C) 2005-2013 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text
