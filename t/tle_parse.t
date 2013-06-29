@@ -33,10 +33,8 @@ EOD
     'Parse TLE with leading spaces.'
     or diag $@;
 
-foreach my $attr ( qw{ international } ) {
-    cmp_ok $got->get( $attr ), 'eq', $want->get( $attr ),
-	"Got expected '$attr' value";
-}
+is $got->get( 'international' ), ' 8  2B',
+    q{Got expected 'international' value};
 
 foreach my $attr ( qw{ id epoch firstderivative secondderivative
     bstardrag ephemeristype elementnumber inclination ascendingnode
@@ -46,6 +44,27 @@ foreach my $attr ( qw{ id epoch firstderivative secondderivative
     cmp_ok $got->get( $attr ), '==', $want->get( $attr ),
 	"Got expected '$attr' value";
 }
+
+my $tle_data = <<'EOD';
+VANGUARD 1
+1 00005U Fubar    00009.78495062  .00000023      0-0  00098-4 0  0053
+2 00005  04.2682 008.7242 0000067 001.7664  09.3264 01.82419157413667
+EOD
+
+ok eval { ( $got ) = Astro::Coord::ECI::TLE->parse( $tle_data ); 1 },
+    'Parse TLE with invalid International Launch Designator.'
+    or diag $@;
+
+is $got->get( 'international' ), 'Fubar',
+    'Got original International Launch Designator';
+
+ok ! defined $got->get( 'launch_year' ), 'Launch year not defined';
+
+ok ! defined $got->get( 'launch_num' ), 'Launch number not defined';
+
+ok ! defined $got->get( 'launch_piece' ), 'Launch piece not defined';
+
+is $got->get( 'tle' ), $tle_data, 'Got original TLE back after parse';
 
 done_testing;
 
