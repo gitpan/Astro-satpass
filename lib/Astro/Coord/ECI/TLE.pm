@@ -218,13 +218,13 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.056_03';
+our $VERSION = '0.056_04';
 
 use base qw{Astro::Coord::ECI Exporter};
 
 use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
     embodies find_first_true load_module looks_like_number
-    max mod2pi PI PIOVER2 rad2deg
+    max min mod2pi PI PIOVER2 rad2deg
     SECSPERDAY TWOPI thetag __default_station };
 
 use Carp qw{carp croak confess};
@@ -1214,6 +1214,22 @@ certainly not the time of the event. If you make use of the {body}
 object you will probably need to set its time to the time of the event
 before you do so.
 
+Note 3:
+
+The algorithm for computing appulses has been modified slightly in
+version [%% next_release %%]. This modification only applies to elements
+of the optional C<\@sky> array that represent artificial satellites.
+
+The problem I'm trying to address is that two satellites in very similar
+orbits can appear to converge again after their appulse, due to their
+increasing distance from the observer. If this happens early enough in
+the pass it can fool the binary search algorithm that determines the
+appulse time.
+
+The revision is to first step across the pass, finding the closest
+approach of the two bodies. A binary search is then done on a small
+interval around the closest approach.
+
 =cut
 
 use constant PASS_EVENT_NONE => dualvar (0, '');	# Guaranteed false.
@@ -1653,7 +1669,9 @@ eod
 	    # than 1 second resolution to detect a transit.
 
 	    foreach my $body (@sky) {
-		my $when = find_first_true ($first_time, $last_time,
+		my $when = find_first_true(
+		    _pass_bracket_appulse( $sta, $tle, $body,
+			$first_time, $last_time ),
 		    sub {$sta->angle ($body->universal ($_[0]),
 				    $tle->universal ($_[0])) <
 			    $sta->angle ($body->universal ($_[0] + .1),
@@ -1802,6 +1820,66 @@ eod
     }
     return @passes;
 
+}
+
+# The problem the following attempts to deal with is that if two
+# satellites with similar orbits rise about the same time, they may
+# appear to approach, diverge, and approach again. The last apparent
+# approach is because they are receding from the observer faster than
+# from each other.
+#
+# What the following code attempts to do is to provide reasonable
+# brackets around the time of closest approach. If the body is a TLE
+# object, we step across the pass in 30-second intervals, and return the
+# interval 30 seconds before and after the closest position found.
+# Otherwise we just return the beginning and end of the pass.
+#
+# Originally there was an attempt to determine if the orbits were
+# "sufficiently close", and only step across if that was the case. But
+# it proved impracticable to define "sufficiently close", and it was
+# determined by benchmarking that the preliminary stepping had only a
+# minimal effect on the algorithm's execution time. So we step any time
+# we are computing an appulse of an artificial satellite to another
+# artificial satellite.
+
+{
+
+    # The following manifest constant is to be used only here. Pretend
+    # it is localized.
+
+    use constant APPULSE_CHECK_STEP	=> 30;	# seconds
+
+    sub _pass_bracket_appulse {
+	my ( $sta, $tle, $body, $first_time, $last_time ) = @_;
+
+	# The problem we're trying to avoid does not occur unless the
+	# body is a TLE.
+	embodies( $body, 'Astro::Coord::ECI::TLE' )
+	    or return ( $first_time, $last_time );
+
+	# OK, we think we have a problem. Step across the entire pass in
+	# 30-second intervals and find the one where the two bodies
+	# approach most closely.
+	my ( $smallest, $mark );
+	for ( my $time = $first_time; $time <= $last_time;
+	    $time += APPULSE_CHECK_STEP
+	) {
+	    my $angle = $sta->angle(
+		$body->universal( $time ),
+		$tle->universal( $time ),
+	    );
+	    defined $smallest
+		and $angle > $smallest
+		or ( $smallest, $mark ) = ( $angle, $time );
+	}
+
+	# We return an interval around this closest point as the
+	# interval in which to apply the binary search algorithm.
+	return (
+	    max( $mark - APPULSE_CHECK_STEP, $first_time ),
+	    min( $mark + APPULSE_CHECK_STEP, $last_time ),
+	);
+    }
 }
 
 
