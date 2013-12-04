@@ -218,7 +218,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.058';
+our $VERSION = '0.059';
 
 use base qw{Astro::Coord::ECI Exporter};
 
@@ -7278,6 +7278,15 @@ sub _convert_out {
 # inertial until set otherwise.
 
 sub _initial_inertial{ return 1 };
+
+# Unsupported, experimental, and subject to change or retraction without
+# notice. The intent is to provide a way for the Astro::App::Satpass2
+# 'list' command to pick an appropriate template to format each line of
+# the listing based on the object being listed.
+sub __list_type {
+    my ( $self ) = @_;
+    return $self->{inertial} ? 'inertial' : 'fixed';
+}
 
 # *equinox_dynamical = \&Astro::Coord::ECI::equinox_dynamical;
 

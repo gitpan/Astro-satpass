@@ -10,6 +10,8 @@
 CVS/
 ^data/
 ^foo
+^.git/
+^.gitignore$
 ^html/
 ^iridium\.dat$
 ^iridium_observers$
@@ -32,7 +34,6 @@ CVS/
 ^sladen\.expect$
 ^sladen\.got$
 ^t/iridium\.dat$
-^t/sgp4-ver\.tle$
 ^t/tle_make\.t$
 ^tags$
 ^USED_BY$

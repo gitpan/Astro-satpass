@@ -143,7 +143,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.058';
+our $VERSION = '0.059';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -2008,7 +2008,7 @@ The object itself is returned, to allow call chaining.
 		$multiplier *= $_;
 	    }
 
-	    my ( $lat, $lon ) = $self->geodetic();
+	    my ( $lat, $lon, $alt ) = $self->geodetic();
 	    $lat = ( $lat + PIOVER2 ) * $multiplier / PI;
 	    $lon = ( $lon + PI ) * $multiplier / TWOPI;
 	    $lat = floor( "$lat" );
@@ -2029,7 +2029,10 @@ The object itself is returned, to allow call chaining.
 	    @rslt > 1
 		and $rslt[-2] = uc $rslt[-2];
 
-	    return join '', reverse @rslt;
+	    return (
+		join( '', reverse @rslt ),
+		$alt,
+	    );
 	}
     }
 
