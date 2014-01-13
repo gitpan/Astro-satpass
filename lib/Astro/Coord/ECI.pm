@@ -49,10 +49,10 @@ While doing this work I realized that the Doppler calculation was using
 the C<frequency> attribute of the observing station, not the satellite.
 The reinstated code will take the C<frequency> from either place, but
 prefers the satellite. I intend to deprecate the use of the observer's
-C<frequency> attribute in the usual way. As of version 0.056_01,
-the first use of the observer's C<frequency> attribute will result in a
-warning. Six months after that, every use will result in a warning, and
-in another six months it will become fatal.
+C<frequency> attribute in the usual way. As of version 0.056, the first
+use of the observer's C<frequency> attribute resulted in a warning. As
+of version 0.056_01, every use resulted in a warning. As of version
+0.061, any use of the observer's frequency is fatal.
 
 Release 0.047_01 contains a number of changes to the handling of
 relative positions:
@@ -143,7 +143,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.060';
+our $VERSION = '0.061';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -300,8 +300,7 @@ attribute is not set.
 
 sub azel {	## no critic (RequireArgUnpacking)
     @_ > 2
-	and croak q{The azel() 'upper' argument is removed; use },
-	    q{the azel_offset() 'offset' argument instead};
+	and croak q{Too many arguments};
     @_ = _expand_args_default_station( @_ );
     $_[2] = $_[2] ? 1 : 0;
     goto &azel_offset;
@@ -419,11 +418,9 @@ sub azel_offset {
 	if ( not defined $freq ) {
 	    $freq = $self->get( 'frequency' );
 	    defined $freq
-		and warnings::enabled( 'deprecated' )
-		and carp 'Specification of frequency on the ',
-		    'observing station is deprecated, and will ',
-		    'become an error in a future release';
-	    # TODO deprecate frequency from station.
+		and croak 'Calculation of Doppler shift based ',
+		    'on the frequency attribute of the observing ',
+		    'station is not allowed';
 	}
 	if ( defined $freq ) {
 	    $velocity[3] = - $freq * $velocity[2] / SPEED_OF_LIGHT;
@@ -4020,7 +4017,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2013 by Thomas R. Wyant, III
+Copyright (C) 2005-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

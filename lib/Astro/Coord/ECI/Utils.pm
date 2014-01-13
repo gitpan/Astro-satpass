@@ -104,7 +104,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.060';
+our $VERSION = '0.061';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -519,9 +519,10 @@ test ($time) is true. The resolution is $limit, which defaults to 1 if
 not specified. If the times are reversed (i.e. the start time is after
 the end time) the time returned is the last time test ($time) is true.
 
-The test () function is assumed to be false for the first part of the
-interval, and true for the rest. If this assumption is violated, the
-result of this subroutine should be considered meaningless.
+The C<test()> function is called with the Perl time as its only
+argument. It is assumed to be false for the first part of the interval,
+and true for the rest. If this assumption is violated, the result of
+this subroutine should be considered meaningless.
 
 The calculation is done by, essentially, a binary search; the interval
 is repeatedly split, the function is evaluated at the midpoint, and a
@@ -1213,7 +1214,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2013 by Thomas R. Wyant, III
+Copyright (C) 2005-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

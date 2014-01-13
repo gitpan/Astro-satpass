@@ -97,19 +97,14 @@ actually be visible above the threshold to be reported. This is actually
 how the attribute would have worked when introduced if I had thought it
 through clearly.
 
-The C<limb> attribute has been removed as of version 0.056_01.
-Attempts to use it will result in a fatal error. Use the
-L<Astro::Coord::ECI|Astro::Coord::ECI> C<edge_of_earths_shadow>
-attribute instead.
-
 Use of the L<SATNAME> JSON attribute to represent the common name of the
 satellite is deprecated in favor of the L<OBJECT_NAME> attribute, since
 the latter is what Space Track uses in their TLE data. Beginning with
 0.053_01, JSON output of TLEs will use the new name.
 
 Beginning with release 0.056_01, loading JSON TLE data which specifies
-L<SATNAME> will produce a warning the first time it happens. Six months
-after that, there will be a warning every time it happens. A further six
+L<SATNAME> produces a warning the first time it happens. As of version
+0.061 there is a warning every time it happens. Six
 months later, loading JSON TLE data which specifies L<SATNAME> will
 become a fatal error.
 
@@ -218,9 +213,9 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.060';
+our $VERSION = '0.061';
 
-use base qw{Astro::Coord::ECI Exporter};
+use base qw{ Astro::Coord::ECI Exporter };
 
 use Astro::Coord::ECI::Utils qw{ :params :time deg2rad dynamical_delta
     embodies find_first_true load_module looks_like_number
@@ -325,15 +320,6 @@ use constant SGP_RHO => .15696615;
 # XM0 => meananomaly
 # XNO => meanmotion
 
-# This subroutine manages the warnings on the deprecation of the 'limb'
-# attribute.
-{
-    sub __limb_deprecation {
-	croak q{The 'limb' attribute has been removed; use the },
-		q{'edge_of_earths_shadow' attribute instead};
-    }
-}
-
 #	List all the legitimate attributes for the purposes of the
 #	get and set methods. Possible values of the hash are:
 #	    undef => read-only attribute
@@ -399,11 +385,6 @@ eod
     revolutionsatepoch => 0,
     debug => 0,
     geometric => 0,	# Use geometric horizon for pass rise/set.
-    limb => sub {	# Whether lit when upper limb above horizon.
-	$_[0]->__limb_deprecation();
-	$_[0]->set( edge_of_earths_shadow => $_[2] ? 1 : 0 );
-	return 0;
-    },
     visible => 0,	# Pass() reports only illuminated passes.
     appulse => 0,	# Maximum appulse to report.
     interval => 0,	# Interval for pass() positions, if positive.
@@ -740,10 +721,6 @@ L</Attributes> section for a description of the attributes.
 
 {
     my %accessor = (
-	limb => sub {
-	    $_[0]->__limb_deprecation();
-	    return $_[0]->get( 'edge_of_earths_shadow' ) ? 1 : 0;
-	},
 	tle => sub {$_[0]{$_[1]} ||= $_[0]->_make_tle()},
     );
     sub get {
@@ -760,6 +737,31 @@ L</Attributes> section for a description of the attributes.
 	    return $static{$name};
 	}
     }
+}
+
+=item @events = $tle->intrinsic_events( $start, $end );
+
+This method returns any events that are intrinsic to the C<$tle> object.
+If optional argument C<$start> is defined, only events occurring at or
+after that Perl time are returned. Similarly, if optional argument
+C<$end> is defined, only events occurring before that Perl time are
+returned.
+
+The return is an array of array references. Each array reference
+specifies the Perl time of the event and a text description of the
+event.
+
+At this level of the object hierarchy nothing is returned. Subclasses
+may override this to add C<pass()> events. The overrides should return
+anything returned by C<SUPER::intrinsic_events(...)> in addition to
+anything they return themselves.
+
+The order of the returned events is undefined.
+
+=cut
+
+sub intrinsic_events {
+    return;
 }
 
 
@@ -1290,7 +1292,6 @@ eod
 	PASS_EVENT_DAY,
     );
     my $verbose = $tle->get ('interval');
-    my $lazy_pass_position = $tle->get( 'lazy_pass_position' );
     my $pass_step = 60;
     my $horizon = $tle->get ('horizon');
     my $effective_horizon = $tle->get ('geometric') ? 0 : $horizon;
@@ -1304,6 +1305,7 @@ eod
     defined $pass_threshold
 	and $pass_threshold > $horizon
 	or $pass_threshold = $horizon;
+    my $pass_backup_earliest = $tle->__pass_backup_earliest();
 
     # We need the number of radians the satellite travels in a minute so
     # we can be slightly conservative determining whether the satellite
@@ -1410,7 +1412,8 @@ eod
 #	    period. Pick up that part now.
 
 	    {	# Single-iteration loop.
-		my $time = $info[0]{time} - $step;
+		( my $time = $info[0]{time} - $step ) < $pass_backup_earliest
+		    and last;
 		my ( $try_azm, $try_elev, $try_rng ) = $sta->azel (
 		    $tle->universal( $time ) );
 		last if $try_elev < $effective_horizon;
@@ -1696,45 +1699,46 @@ eod
 			    $tle->universal ($when));
 		next if $angle > $appulse_dist;
 		my ( $azimuth, $elevation, $range ) = $sta->azel( $tle );
+		push @info, {
+		    body	=> $tle,
+		    event	=> PASS_EVENT_APPULSE,
+		    station	=> $sta,
+		    time	=> $when,
+		    azimuth	=> $azimuth,
+		    elevation	=> $elevation,
+		    range	=> $range,
+		    appulse	=> {
+			angle	=> $angle,
+			body	=> $body,
+		    },
+		    _find_illumination( $sun, $when, \@info ),
+		};
 
-		{	# Localize
-		    my @illumination;
-		    if ( $sun ) {
-			my $illum = $info[0]{illumination};
-			foreach my $evt ( @info ) {
-			    $evt->{time} > $when
-				and last;
-			    $illum = $evt->{illumination};
-			}
-			push @illumination, illumination => $illum;
-		    }
-		    push @info, {
-			body	=> $tle,
-			event	=> PASS_EVENT_APPULSE,
-			station	=> $sta,
-			time	=> $when,
-			azimuth	=> $azimuth,
-			elevation	=> $elevation,
-			range	=> $range,
-			appulse	=> {
-			    angle	=> $angle,
-			    body	=> $body,
-			},
-			@illumination,
-		    };
-		}
 		warn <<"EOD" if $debug;	## no critic (RequireCarping)
 	    $time[$#time][1] @{[strftime '%d-%b-%Y %H:%M:%S',
 		localtime $time[$#time][0]]}
 EOD
 	    }
 
+	    # Add in the intrinsic events if there are any.
+	    foreach my $evt (
+		$tle->intrinsic_events( $first_time, $last_time )
+	    ) {
+		my ( $when, $event ) = @{ $evt };
+		push @info, {
+		    body	=> $tle,
+		    event	=> $event,
+		    station	=> $sta,
+		    time	=> $when,
+		    _find_illumination( $sun, $when, \@info ),
+		    $tle->_find_position( $sta, $when ),
+		};
+	    }
+
 	    # If we're verbose, calculate the points.
 
 	    if ( $verbose ) {
 
-		my $inx = 0;
-		my $illum = $info[$inx++]{illumination};
 		my %events = map { $_->{time} => 1 } @info;
 		for ( my $it = ceil( $first_time ); $it < $last_time;
 		    $it += $verbose ) {
@@ -1749,26 +1753,14 @@ EOD
 		    # the end of that part of @info, but in practice we
 		    # exit the for loop before we get to that point.
 
-		    {	# Localize
-			my @illumination;
-			if ( $sun ) {
-			    while ( $info[$inx]{time} < $it ) {
-				$illum = $info[$inx++]{illumination};
-			    }
-			    push @illumination, illumination => $illum;
-			}
-			push @info, {
-			    body => $tle,
-			    event => PASS_EVENT_NONE,
-			    station => $sta,
-			    time => $it,
-			    @illumination,
-			};
-		    }
-		    $lazy_pass_position
-			or @{ $info[-1] }{
-			    qw{azimuth elevation range } } =
-			    $sta->azel( $tle->universal( $it ) );
+		    push @info, {
+			body => $tle,
+			event => PASS_EVENT_NONE,
+			station => $sta,
+			time => $it,
+			_find_illumination( $sun, $it, \@info ),
+			$tle->_find_position( $sta, $it ),
+		    };
 		}
 	    }
 
@@ -1894,6 +1886,14 @@ eod
 	    min( $mark + APPULSE_CHECK_STEP, $last_time ),
 	);
     }
+}
+
+# Unpublished, and subject to retraction. The sole purpose of this is to
+# give the experimental Astro::Coord::ECI::Point class a way to prevent
+# the Astro::Coord::ECI::TLE pass() method from backing up ad infinitum
+# trying to find the time when the body rises.
+sub __pass_backup_earliest {
+    return 0;
 }
 
 
@@ -7114,8 +7114,6 @@ encoded with a four-digit year.
 	return $rslt;
     }
 
-    my $satname_deprecated;
-
     sub _parse_json {
 	my ( $self, @args ) = @_;
 	defined $have_json
@@ -7136,8 +7134,7 @@ BODY_LOOP:
 		$decode ) {
 
 		if ( exists $hash->{SATNAME} ) {	# TODO Deprecated
-		    not $satname_deprecated++
-			and warnings::enabled( 'deprecated' )
+		    warnings::enabled( 'deprecated' )
 			and carp 'The SATNAME JSON key is deprecated ',
 			    'in favor of the OBJECT_NAME key';
 		    exists $hash->{OBJECT_NAME}
@@ -7272,6 +7269,41 @@ sub _convert_out {
     $self->equinox_dynamical ($self->{epoch_dynamical});
 
     return $self;
+}
+
+# Called by pass() to find the illumination. The arguments are the sun
+# object (or nothing), the time, and a reference to the pass information
+# hash. The return is either nothing (if $sun is not defined) or
+# ( illumination => $illum ).
+sub _find_illumination {
+    my ( $sun, $when, $info ) = @_;
+    $sun
+	or return;
+    my $illum = $info->[0]{illumination};
+    foreach my $evt ( @{ $info } ) {
+	$evt->{time} > $when
+	    and last;
+	$illum = $evt->{illumination};
+    }
+    return ( illumination	=> $illum );
+}
+
+# Called by pass() to calculate azimuth, elevation, and range. The
+# arguments are the TLE object, the station object, and the time. If the
+# TLE's 'lazy_pass_position' attribute is true, nothing is returned.
+# Otherwise the azimuth, elevation, and range are calculated and
+# returned as three name/value pairs (i.e. a six-element list).
+sub _find_position {
+    my ( $tle, $sta, $when ) = @_;
+    $tle->get( 'lazy_pass_position' )
+	and return;
+    $tle->universal( $when );
+    my ( $azimuth, $elevation, $range ) = $sta->azel( $tle );
+    return (
+	azimuth	=> $azimuth,
+	elevation	=> $elevation,
+	range		=> $range,
+    );
 }
 
 # Initial value of the 'inertial' attribute. TLEs are assumed to be
@@ -8529,16 +8561,6 @@ C<{time}>, before retrieving the coordinates you want.
 
 The default is 0 (i.e. false).
 
-=item limb (boolean, static)
-
-This attribute tells the pass() method how to compute illumination
-of the body. If true, it is computed based on the upper limb of the
-source of illumination; if false, it is based on the center.
-
-This attribute has been removed as of version 0.056_01 in
-favor of the superclass' C<edge_of_earths_shadow> attribute. Any attempt
-to use it will result in a fatal error.
-
 =item meananomaly (numeric, parse)
 
 This attribute contains the mean orbital anomaly at the epoch, in
@@ -8725,7 +8747,7 @@ Thomas R. Wyant, III (F<wyant at cpan dot org>)
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2013 by Thomas R. Wyant, III
+Copyright (C) 2005-2014 by Thomas R. Wyant, III
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl 5.10.0. For more details, see the full text

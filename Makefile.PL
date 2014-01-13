@@ -35,6 +35,13 @@ The following executable can be installed:
 If you do not want this, run Makefile.PL with the -n option. If you want
 to install without being asked, run Makefile.PL with the -y option.
 
+>>>> NOTICE <<<<\a\a\a
+
+I plan to eliminate the question about whether to install the satpass
+script in the first release after August 1 2014. The default behavior
+will be NOT to install. At some time after this the name of the package
+will change to Astro-Coord-ECI, like it should have been all along.
+
 Unless you are running MSWin32 or VMS (which are special-cased), I will
 assume you are running some version of U*ix, and behave accordingly.
 
@@ -115,7 +122,7 @@ $mmv >= 6.4501 and $attr{META_MERGE} = {
     dynamic_config => 1,
     resources => {
 	bugtracker => 'https://rt.cpan.org/Public/Dist/Display.html?Name=Astro-satpass',
-	license => [ 'http://dev.perl.org/licenses/' ],
+	license => 'http://dev.perl.org/licenses/',
     },
 };
 
