@@ -104,7 +104,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.061';
+our $VERSION = '0.061_01';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -139,15 +139,15 @@ our @EXPORT;
 our @EXPORT_OK = ( qw{
 	AU $DATETIMEFORMAT $JD_GREGORIAN JD_OF_EPOCH LIGHTYEAR PARSEC
 	PERL2000 PI PIOVER2 SECSPERDAY SECS_PER_SIDERIAL_DAY
-	SPEED_OF_LIGHT TWOPI acos asin
+	SPEED_OF_LIGHT TWOPI acos add_magnitudes asin
 	atmospheric_extinction date2epoch date2jd deg2rad distsq
 	dynamical_delta embodies epoch2datetime equation_of_time
-	find_first_true intensity_to_magnitude jcent2000 jd2date
-	jd2datetime jday2000 julianday keplers_equation load_module
-	looks_like_number max min mod2pi nutation_in_longitude
-	nutation_in_obliquity obliquity omega rad2deg tan theta0 thetag
-	vector_cross_product vector_dot_product vector_magnitude
-	vector_unitize
+	find_first_true fold_case intensity_to_magnitude jcent2000
+	jd2date jd2datetime jday2000 julianday keplers_equation
+	load_module looks_like_number max min mod2pi
+	nutation_in_longitude nutation_in_obliquity obliquity omega
+	rad2deg tan theta0 thetag vector_cross_product
+	vector_dot_product vector_magnitude vector_unitize
        	__classisa __default_station __instance },
 	@time_routines );
 
@@ -187,6 +187,23 @@ Programming error - Trying to take the arc cosine of a number greater
         than 1.
 eod
     return atan2 (sqrt (1 - $_[0] * $_[0]), $_[0])
+}
+
+=item $mag = add_magnitudes( $mag1, $mag2, ... );
+
+This subroutine computes the total magnitude of a list of individual
+magnitudes.  The algorithm comes from Jean Meeus' "Astronomical
+Algorithms", Second Edition, Chapter 56, Page 393.
+
+=cut
+
+sub add_magnitudes {
+    my @arg = @_;
+    my $sum = 0;
+    foreach my $mag ( @arg ) {
+	$sum += 10 ** ( -0.4 * $mag );
+    }
+    return -2.5 * log( $sum ) / log( 10 );
 }
 
 
@@ -562,6 +579,15 @@ sub find_first_true {
     }
     return $end;
 }
+
+=item $folded = fold_case( $text );
+
+This function folds the case of its input, kinda sorta. It maps to
+C<CORE::fc> if that is available, otherwise it maps to C<CORE::lc>.
+
+=cut
+
+*fold_case = CORE->can( 'fc' ) || CORE->can( 'lc' );
 
 
 =item $difference = intensity_to_magnitude ($ratio)

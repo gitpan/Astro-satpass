@@ -143,7 +143,7 @@ package Astro::Coord::ECI;
 use strict;
 use warnings;
 
-our $VERSION = '0.061';
+our $VERSION = '0.061_01';
 
 use Astro::Coord::ECI::Utils qw{:all};
 use Carp;
@@ -1026,6 +1026,7 @@ sub equatorial {
 ##	my ($ra, $dec, $range, @eqvel) = @args;
 	$args[0] = _check_right_ascension( 'right ascension' => $args[0] );
 	$args[1] = _check_latitude( declination => $args[1] );
+	foreach my $key (@kilatr) {delete $self->{$key}}
 	$self->{_ECI_cache}{inertial}{equatorial} = \@args;
 	$self->eci(
 	    _convert_spherical_to_cartesian( @args ) );
@@ -2339,11 +2340,9 @@ universal time.>
 =cut
 
 sub precess {
-    my $self = shift;
-    if (@_ && $_[0]) {
-	$_[0] += dynamical_delta ($_[0]);
-    }
-    return $self->precess_dynamical (@_);
+    $_[1]
+	and $_[1] += dynamical_delta( $_[1] );
+    goto &precess_dynamical;
 }
 
 
@@ -2361,6 +2360,10 @@ unaffected by this operation.>
 As a side effect, the value of the 'equinox_dynamical' attribute will be
 set to the dynamical time corresponding to the argument.
 
+As of version 0.061_01, this does nothing to non-inertial
+objects -- that is, those whose position was set in Earth-fixed
+coordinates.
+
 If the object's 'station' attribute is set, the station is also
 precessed.
 
@@ -2377,13 +2380,19 @@ sub precess_dynamical {
     $end
 	or croak "No equinox time specified";
 
-    (defined (my $start = $self->get ('equinox_dynamical'))
-	|| !$self->get ('inertial'))
+    # Non-inertial coordinate systems are not referred to the equinox,
+    # and so do not get precessed.
+    $self->get( 'inertial' )
+	or return $self;
+
+    defined ( my $start = $self->get( 'equinox_dynamical' ) )
 	or carp "Warning - Precess called with equinox_dynamical ",
 	    "attribute undefined";
     $start ||= $self->dynamical ();
 
-    if ( my $sta = $self->get( 'station' ) ) {
+    my $sta;
+    if ( $sta = $self->get( 'station' ) and $sta->get( 'inertial' ) 
+    ) {
 	$sta->get( 'station' )
 	    and croak NO_CASCADING_STATIONS;
 	$sta->universal( $self->universal() );
@@ -2423,10 +2432,6 @@ sub precess_dynamical {
 
     $self->equatorial ($alpha, $delta, $rho0);
     $self->set (equinox_dynamical => $end);
-
-    if ( my $sta = $self->get( 'station' ) ) {
-	$sta->precess_dynamical( $end );
-    }
 
     return $self;
 }
@@ -3239,6 +3244,11 @@ eod
 	$data[3] -= $data[1] * $self->{angularvelocity};
 	$data[4] += $data[0] * $self->{angularvelocity};
     }
+
+    # A bunch of digging says this was added by Subversion commit 697,
+    # which was first released with Astro::Coord::ECI version 0.014. The
+    # comment says "Handle equinox in conversion between eci and ecef.
+    # Correctly, I hope." I'm leaving it in for now, but ...
     $self->set (equinox_dynamical => $self->dynamical);
     return @{$self->{_ECI_cache}{inertial}{eci} = \@data};
 }
