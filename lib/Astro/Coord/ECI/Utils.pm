@@ -104,7 +104,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.061_01';
+our $VERSION = '0.061_02';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -587,7 +587,7 @@ C<CORE::fc> if that is available, otherwise it maps to C<CORE::lc>.
 
 =cut
 
-*fold_case = CORE->can( 'fc' ) || CORE->can( 'lc' );
+*fold_case = CORE->can( 'fc' ) || sub ($) { return lc $_[0] };
 
 
 =item $difference = intensity_to_magnitude ($ratio)
