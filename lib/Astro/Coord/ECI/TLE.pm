@@ -213,7 +213,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.061_02';
+our $VERSION = '0.061_03';
 
 use base qw{ Astro::Coord::ECI Exporter };
 
@@ -984,7 +984,8 @@ functionality that would otherwise accept them.
 		and next;	# Extension to syntax.
 	    $parse_info->{pad} > length
 		and $_ = sprintf '%-*s', $parse_info->{pad}, $_;
-	    my ( $id, $mag ) = unpack $parse_info->{template};
+	    # Perl 5.8 and below require an explicit buffer to unpack.
+	    my ( $id, $mag ) = unpack $parse_info->{template}, $_;
 	    $mag =~ s/ \s+ //smxg;
 	    looks_like_number( $mag )
 		or next;
