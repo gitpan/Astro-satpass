@@ -229,7 +229,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.061_06';
+our $VERSION = '0.062';
 
 use base qw{ Astro::Coord::ECI Exporter };
 
@@ -8703,7 +8703,7 @@ sub _next_elevation_screen {
              },
   '24944' => {
                'comment' => '',
-               'status' => 0,
+               'status' => 2,
                'name' => 'Iridium 29',
                'class' => 'Astro::Coord::ECI::TLE::Iridium',
                'type' => 'iridium',
