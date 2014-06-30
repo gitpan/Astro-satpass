@@ -104,7 +104,7 @@ package Astro::Coord::ECI::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.064';
+our $VERSION = '0.064_01';
 our @ISA = qw{Exporter};
 
 use Carp;
@@ -140,15 +140,16 @@ our @EXPORT_OK = ( qw{
 	AU $DATETIMEFORMAT $JD_GREGORIAN JD_OF_EPOCH LIGHTYEAR PARSEC
 	PERL2000 PI PIOVER2 SECSPERDAY SECS_PER_SIDERIAL_DAY
 	SPEED_OF_LIGHT TWOPI acos add_magnitudes asin
-	atmospheric_extinction date2epoch date2jd deg2rad distsq
-	dynamical_delta embodies epoch2datetime equation_of_time
-	find_first_true fold_case intensity_to_magnitude jcent2000
-	jd2date jd2datetime jday2000 julianday keplers_equation
-	load_module looks_like_number max min mod2pi
+	atmospheric_extinction date2epoch date2jd
+	decode_space_track_json_time deg2rad distsq dynamical_delta
+	embodies epoch2datetime equation_of_time find_first_true
+	fold_case format_space_track_json_time intensity_to_magnitude
+	jcent2000 jd2date jd2datetime jday2000 julianday
+	keplers_equation load_module looks_like_number max min mod2pi
 	nutation_in_longitude nutation_in_obliquity obliquity omega
 	rad2deg tan theta0 thetag vector_cross_product
-	vector_dot_product vector_magnitude vector_unitize
-       	__classisa __default_station __instance },
+	vector_dot_product vector_magnitude vector_unitize __classisa
+	__default_station __instance },
 	@time_routines );
 
 our %EXPORT_TAGS = (
@@ -336,6 +337,39 @@ sub date2epoch {
     return (date2jd ($day, $mon, $yr) - JD_OF_EPOCH) * SECSPERDAY +
     (($hr || 0) * 60 + ($min || 0)) * 60 + ($sec || 0);
 }
+
+=item $time = decode_space_track_json_time( $string )
+
+This subroutine decodes a time in the format Space Track uses in their
+JSON code. This is ISO-8601-ish, but with a possible fractional part and
+no zone.
+
+=cut
+
+sub decode_space_track_json_time {
+    my ( $string ) = @_;
+    $string =~ m{ \A \s*
+	( \d+ ) \D+ ( \d+ ) \D+ ( \d+ ) \D+
+	( \d+ ) \D+ ( \d+ ) \D+ ( \d+ ) (?: ( [.] \d* ) )? \s* \z }smx
+	or return;
+    my @time = ( $1, $2, $3, $4, $5, $6 );
+    my $frac = $7;
+    if ( $time[0] < 100 ) {
+	$time[0] < 57
+	    and $time[0] += 100;
+    } elsif ( $time[0] < 1900 ) {
+	return;
+    } else {
+	$time[0] -= 1900;
+    }
+    $time[1] -= 1;
+    my $rslt = timegm( reverse @time );
+    defined $frac
+	and $frac ne '.'
+	and $rslt += $frac;
+    return $rslt;
+}
+
 
 # my ( $self, $station, @args ) = __default_station( @_ )
 #
@@ -589,10 +623,29 @@ C<CORE::fc> if that is available, otherwise it maps to C<CORE::lc>.
 
 *fold_case = CORE->can( 'fc' ) || sub ($) { return lc $_[0] };
 
+=item $fmtd = format_space_track_json_time( time() )
+
+This function takes as input a Perl time, and returns that time
+in a format consistent with the Space Track JSON data. This is
+ISO-8601-ish, in Universal time, but without the zone indicated.
+
+=cut
+
+sub format_space_track_json_time {
+    my ( $time ) = @_;
+    defined $time
+	and $time =~ m/ \S /smx
+	or return;
+    my @parts = gmtime floor( $time + .5 );
+    $parts[4] += 1;
+    $parts[5] += 1900;
+    return sprintf '%04d-%02d-%02d %02d:%02d:%02d', reverse
+	@parts[ 0 .. 5 ];
+}
 
 =item $difference = intensity_to_magnitude ($ratio)
 
-This method converts a ratio of light intensities to a difference in
+This function converts a ratio of light intensities to a difference in
 stellar magnitudes. The algorithm comes from Jean Meeus' "Astronomical
 Algorithms", Second Edition, Chapter 56, Page 395.
 
