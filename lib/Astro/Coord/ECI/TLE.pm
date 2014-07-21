@@ -229,7 +229,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.064_01';
+our $VERSION = '0.064_03';
 
 use base qw{ Astro::Coord::ECI Exporter };
 
@@ -7784,7 +7784,7 @@ sub _find_position {
 # Initial value of the 'inertial' attribute. TLEs are assumed to be
 # inertial until set otherwise.
 
-sub _initial_inertial{ return 1 };
+sub __initial_inertial{ return 1 };
 
 # Unsupported, experimental, and subject to change or retraction without
 # notice. The intent is to provide a way for the Astro::App::Satpass2
@@ -7844,14 +7844,21 @@ sub _looks_like_real {
 	},
     );
 
+    my @required_fields = qw{
+	firstderivative secondderivative bstardrag inclination
+	ascendingnode eccentricity argumentofperigee meananomaly
+	meanmotion revolutionsatepoch
+    };
+
     sub _make_tle {
 	my $self = shift;
 	my $output;
 
 	my $oid = $self->get('id');
+	my $name = $self->get( 'name' );
 	my @line0;
 
-	if ( defined ( my $name = $self->get( 'name' ) ) ) {
+	if ( defined $name ) {
 	    $name =~ s/ \s+ \z //smx;
 	    $name ne ''
 		and push @line0, substr $name, 0, 24;
@@ -7869,13 +7876,23 @@ sub _looks_like_real {
 
 	my %ele;
 	{
-	    foreach (qw{firstderivative secondderivative bstardrag
-		inclination ascendingnode eccentricity
-		argumentofperigee meananomaly meanmotion
-		revolutionsatepoch}) {
-		defined ($ele{$_} = $self->get($_))
-		    or croak "OID $oid ", ucfirst $_,
-			"undefined; can not generate TLE";
+	    my @missing_fields;
+	    foreach ( @required_fields ) {
+		defined( $ele{$_} = $self->get( $_ ) )
+		    and next;
+		push @missing_fields, $_;
+	    }
+
+	    if ( @missing_fields ) {
+		# If all required fields are missing we presume it is
+		# deliberate, and return nothing.
+		@required_fields == @missing_fields
+		    and return undef;	## no critic (ProhibitExplicitReturnUndef)
+		# Otherwise we croak with an error
+		croak 'Can not generate TLE for ',
+		    defined $oid ? $oid : $name,
+		    '; undefined attribute(s) ',
+		    join ', ', @missing_fields;
 	    }
 	    my $temp = SGP_TWOPI;
 	    foreach (qw{meanmotion firstderivative secondderivative}) {

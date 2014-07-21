@@ -50,7 +50,7 @@ package Astro::Coord::ECI::Sun;
 use strict;
 use warnings;
 
-our $VERSION = '0.064_01';
+our $VERSION = '0.064_03';
 
 use base qw{Astro::Coord::ECI};
 
@@ -457,7 +457,7 @@ eod
 
 # The Sun is normally positioned in inertial coordinates.
 
-sub _initial_inertial { return 1 }
+sub __initial_inertial { return 1 }
 
 1;
 
