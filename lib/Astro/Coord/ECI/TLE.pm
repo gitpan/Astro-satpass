@@ -113,16 +113,17 @@ actually be visible above the threshold to be reported. This is actually
 how the attribute would have worked when introduced if I had thought it
 through clearly.
 
-Use of the L<SATNAME> JSON attribute to represent the common name of the
-satellite is deprecated in favor of the L<OBJECT_NAME> attribute, since
+Use of the C<SATNAME> JSON attribute to represent the common name of the
+satellite is deprecated in favor of the C<OBJECT_NAME> attribute, since
 the latter is what Space Track uses in their TLE data. Beginning with
 0.053_01, JSON output of TLEs will use the new name.
 
 Beginning with release 0.056_01, loading JSON TLE data which specifies
-L<SATNAME> produces a warning the first time it happens. As of version
-0.061 there is a warning every time it happens. Six
-months later, loading JSON TLE data which specifies L<SATNAME> will
-become a fatal error.
+C<SATNAME> produces a warning the first time it happens. As of version
+0.061 there is a warning every time it happens. As of version 0.066
+loading JSON TLE data which specifies C<SATNAME> is a fatal error. Six
+months after this, all code referring to C<SATNAME> will be removed,
+meaning that the key will be silently ignored.
 
 =head1 DESCRIPTION
 
@@ -229,7 +230,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.065';
+our $VERSION = '0.066';
 
 use base qw{ Astro::Coord::ECI Exporter };
 
@@ -7613,7 +7614,7 @@ encoded with a four-digit year.
 
 	if ( exists $hash->{SATNAME} ) {	# TODO Deprecated
 	    warnings::enabled( 'deprecated' )
-		and carp 'The SATNAME JSON key is deprecated ',
+		and croak 'The SATNAME JSON key is deprecated ',
 		    'in favor of the OBJECT_NAME key';
 	    exists $hash->{OBJECT_NAME}
 		or $hash->{OBJECT_NAME} = $hash->{SATNAME};
@@ -8547,7 +8548,7 @@ sub _next_elevation_screen {
              },
   '25077' => {
                'comment' => '',
-               'status' => 0,
+               'status' => 2,
                'name' => 'Iridium 42',
                'class' => 'Astro::Coord::ECI::TLE::Iridium',
                'type' => 'iridium',
@@ -8945,7 +8946,7 @@ sub _next_elevation_screen {
 #
 #   $ eg/visual -merge
 #
-# Last-Modified: Sat, 14 Jun 2014 22:30:35 GMT
+# Last-Modified: Thu, 14 Aug 2014 22:25:22 GMT
 
 %magnitude_table = (
   '00694' => 3.5,
