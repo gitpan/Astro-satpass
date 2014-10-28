@@ -230,7 +230,7 @@ package Astro::Coord::ECI::TLE;
 use strict;
 use warnings;
 
-our $VERSION = '0.066';
+our $VERSION = '0.066_01';
 
 use base qw{ Astro::Coord::ECI Exporter };
 
@@ -2699,11 +2699,18 @@ Error - The status ('drop') call requires a NORAD ID.
 eod
 	delete $status{$id};
     } elsif ($cmd eq 'dump') {	# <<<< Undocumented!!!
+	# This functionality is UNDOCUMENTED and UNSUPPORTED. It exists
+	# for the convenience of the author, who reserves the right to
+	# change or revoke it without notice.
+	# If called in void context, prints a Data::Dumper dump of the
+	# status information; otherwise returns the dump.
 	local $Data::Dumper::Terse = 1;
 	local $Data::Dumper::Sortkeys = 1;
 	my $data = @arg ?
 	    +{ map { $_ => $status{$_} } grep { $status{$_} } @arg } :
 	    \%status;
+	defined wantarray
+	    and return __PACKAGE__ . ' status = ', Dumper( $data );
 	print __PACKAGE__, " status = ", Dumper ( $data );
     } elsif ($cmd eq 'show') {
 	return (
@@ -2714,11 +2721,18 @@ eod
 	    @arg ? @arg : keys %status
 	);
     } elsif ($cmd eq 'yaml') {	# <<<< Undocumented!!!
+	# This functionality is UNDOCUMENTED and UNSUPPORTED. It exists
+	# for the convenience of the author, who reserves the right to
+	# change or revoke it without notice.
+	# If called in void context, prints a YAML dump of the status
+	# information; otherwise returns the YAML dump.
 	load_module( 'YAML' )
 	    or croak 'YAML not available';
 	my $data = @arg ?
 	    +{ map { $_ => $status{$_} } grep { $status{$_} } @arg } :
 	    \%status;
+	defined wantarray
+	    and return YAML::Dump( $data );
 	print YAML::Dump( $data );
     } else {
 	croak <<eod;
@@ -8946,7 +8960,7 @@ sub _next_elevation_screen {
 #
 #   $ eg/visual -merge
 #
-# Last-Modified: Thu, 14 Aug 2014 22:25:22 GMT
+# Last-Modified: Tue, 28 Oct 2014 04:22:35 GMT
 
 %magnitude_table = (
   '00694' => 3.5,
@@ -8998,6 +9012,7 @@ sub _next_elevation_screen {
   '14820' => 5.5,
   '15354' => 5.0,
   '15483' => 5.5,
+  '15494' => 4.5,
   '15772' => 5.0,
   '15945' => 5.5,
   '16111' => 5.0,
